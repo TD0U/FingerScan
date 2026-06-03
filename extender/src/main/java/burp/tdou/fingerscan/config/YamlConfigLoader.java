@@ -15,6 +15,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * YAML 配置加载器（带缓存 + SafeConstructor）
@@ -37,6 +40,11 @@ public class YamlConfigLoader {
     private volatile List<Map<String, Object>> cachedEnabledRules;
     private volatile List<String> cachedScanPaths;
     private volatile long cachedRulesLastModified = -1;
+
+    // 过滤规则缓存
+    private volatile List<Map<String, Object>> cachedEnabledFilters;
+    private volatile long cachedFiltersLastModified = -1;
+    private final ConcurrentHashMap<String, Pattern> filterPatternCache = new ConcurrentHashMap<>();
 
     public YamlConfigLoader(String configFilePath) {
         this.configFilePath = configFilePath != null ? configFilePath : getDefaultConfigPath();
@@ -313,6 +321,129 @@ public class YamlConfigLoader {
         writeConfig(config);
     }
 
+    // ============================================================
+    // 全局过滤规则（Response Body Filter）
+    // ============================================================
+
+    /**
+     * 获取所有过滤规则
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getFilterRules() {
+        Map<String, Object> config = readConfig();
+        List<Map<String, Object>> list = (List<Map<String, Object>>) config.get("Filter_List");
+        return list != null ? list : new ArrayList<>();
+    }
+
+    /**
+     * 获取已启用的过滤规则（带缓存）
+     */
+    public List<Map<String, Object>> getEnabledFilterRules() {
+        File file = new File(configFilePath);
+        long lastModified = file.exists() ? file.lastModified() : 0;
+
+        if (cachedEnabledFilters != null && lastModified == cachedFiltersLastModified) {
+            return cachedEnabledFilters;
+        }
+
+        List<Map<String, Object>> rules = getFilterRules();
+        List<Map<String, Object>> enabled = new ArrayList<>();
+        for (Map<String, Object> rule : rules) {
+            Object loaded = rule.get("loaded");
+            if (loaded == null || Boolean.TRUE.equals(loaded)) {
+                enabled.add(rule);
+            }
+        }
+
+        cachedEnabledFilters = enabled;
+        cachedFiltersLastModified = lastModified;
+        return enabled;
+    }
+
+    /**
+     * 检查响应内容是否匹配任意已启用的过滤规则
+     *
+     * @param responseBytes 响应原始字节
+     * @return true 表示应跳过指纹识别
+     */
+    public boolean isResponseFiltered(byte[] responseBytes) {
+        if (responseBytes == null || responseBytes.length == 0) {
+            return false;
+        }
+
+        List<Map<String, Object>> filters = getEnabledFilterRules();
+        if (filters.isEmpty()) {
+            return false;
+        }
+
+        String responseStr = new String(responseBytes);
+        for (Map<String, Object> filter : filters) {
+            Object regexObj = filter.get("re");
+            if (regexObj == null) continue;
+            String regex = regexObj.toString();
+            if (regex.isEmpty()) continue;
+            try {
+                Pattern pattern = filterPatternCache.computeIfAbsent(regex, r -> {
+                    try {
+                        return Pattern.compile(r, Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+                    } catch (Exception e) {
+                        Logger.debug("Invalid filter regex: %s", r);
+                        return null;
+                    }
+                });
+                if (pattern != null && pattern.matcher(responseStr).find()) {
+                    return true;
+                }
+            } catch (Exception e) {
+                Logger.debug("Filter regex match error: %s", e.getMessage());
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 添加过滤规则
+     */
+    public void addFilterRule(Map<String, Object> rule) {
+        Map<String, Object> config = readConfig();
+        List<Map<String, Object>> list = getFilterRules();
+        list.add(rule);
+        config.put("Filter_List", list);
+        writeConfig(config);
+        cachedEnabledFilters = null;
+        filterPatternCache.clear();
+    }
+
+    /**
+     * 更新过滤规则（按索引）
+     */
+    public void updateFilterRule(int index, Map<String, Object> updatedRule) {
+        Map<String, Object> config = readConfig();
+        List<Map<String, Object>> list = getFilterRules();
+        if (index >= 0 && index < list.size()) {
+            list.set(index, updatedRule);
+            config.put("Filter_List", list);
+            writeConfig(config);
+            cachedEnabledFilters = null;
+            filterPatternCache.clear();
+        }
+    }
+
+    /**
+     * 删除过滤规则（按索引）
+     */
+    public void removeFilterRule(int index) {
+        Map<String, Object> config = readConfig();
+        List<Map<String, Object>> list = getFilterRules();
+        if (index >= 0 && index < list.size()) {
+            list.remove(index);
+            config.put("Filter_List", list);
+            writeConfig(config);
+            cachedEnabledFilters = null;
+            filterPatternCache.clear();
+        }
+    }
+
     /**
      * 强制清除缓存
      */
@@ -322,6 +453,9 @@ public class YamlConfigLoader {
         cachedEnabledRules = null;
         cachedScanPaths = null;
         cachedRulesLastModified = -1;
+        cachedEnabledFilters = null;
+        cachedFiltersLastModified = -1;
+        filterPatternCache.clear();
     }
 
     public String getConfigFilePath() {

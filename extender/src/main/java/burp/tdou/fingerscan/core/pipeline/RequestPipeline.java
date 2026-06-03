@@ -14,6 +14,7 @@ import burp.tdou.fingerscan.core.ScanResult;
 import burp.tdou.fingerscan.core.ScanTask;
 import burp.tdou.fingerscan.core.rule.MatchResult;
 import burp.tdou.fingerscan.core.rule.RuleEngine;
+import burp.tdou.fingerscan.config.YamlConfigLoader;
 import burp.tdou.fingerscan.core.iconhash.IconHashMatcher;
 import burp.tdou.fingerscan.core.iconhash.IconHashStore;
 
@@ -45,6 +46,7 @@ public class RequestPipeline {
     private final MontoyaApi api;
     private final IconHashMatcher iconHashMatcher;
     private final IconHashStore iconHashStore;
+    private final YamlConfigLoader configLoader;
 
     private volatile ExecutorService requestPool;
     private volatile ExecutorService analysisPool;
@@ -59,13 +61,15 @@ public class RequestPipeline {
     public RequestPipeline(MontoyaApi api, RuleEngine ruleEngine,
                            int requestThreadCount, int analysisThreadCount,
                            int qpsLimit, int qpsDelay,
-                           IconHashMatcher iconHashMatcher, IconHashStore iconHashStore) {
+                           IconHashMatcher iconHashMatcher, IconHashStore iconHashStore,
+                           YamlConfigLoader configLoader) {
         this.api = api;
         this.ruleEngine = ruleEngine;
         this.requestThreadCount = requestThreadCount;
         this.analysisThreadCount = analysisThreadCount;
         this.iconHashMatcher = iconHashMatcher;
         this.iconHashStore = iconHashStore;
+        this.configLoader = configLoader;
 
         this.dedup = new DeduplicateFilter();
         this.qpsLimiter = new QpsLimiter(qpsLimit, qpsDelay);
@@ -107,8 +111,9 @@ public class RequestPipeline {
 
         pool.execute(() -> {
             try {
+                String requestPath = extractRequestPath(task.getReqResp());
                 List<MatchResult> matches = ruleEngine.match(
-                        task.getExistingRequest(), task.getExistingResponse());
+                        task.getExistingRequest(), task.getExistingResponse(), requestPath);
 
                 // 无论是否匹配到指纹，都构建完整结果用于扫描记录
                 ScanResult.Builder builder = new ScanResult.Builder()
@@ -139,6 +144,11 @@ public class RequestPipeline {
             try {
                 byte[] respBytes = task.getExistingResponse();
                 if (respBytes == null || respBytes.length == 0) {
+                    return;
+                }
+
+                // 全局响应过滤器：匹配到过滤规则则跳过 icon hash 识别
+                if (configLoader != null && configLoader.isResponseFiltered(respBytes)) {
                     return;
                 }
 
@@ -300,7 +310,7 @@ public class RequestPipeline {
         }
 
         byte[] reqBytes = request != null ? request.toByteArray().getBytes() : null;
-        List<MatchResult> matches = ruleEngine.match(reqBytes, respBytes);
+        List<MatchResult> matches = ruleEngine.match(reqBytes, respBytes, reqUrl);
 
         return new ScanResult.Builder()
                 .task(task)
@@ -352,18 +362,28 @@ public class RequestPipeline {
      */
     private String extractRequestPath(HttpRequest request) {
         if (request == null) return "";
-        // Parse from raw request header line
+        // 优先使用 Montoya API 的 path()，返回纯路径（如 /swagger-ui.html）
+        String path = request.path();
+        if (path != null && !path.isEmpty()) {
+            return path;
+        }
+        // 降级：从原始请求行解析
         String reqStr = request.toString();
         int lineEnd = reqStr.indexOf("\r\n");
         if (lineEnd < 0) lineEnd = reqStr.indexOf("\n");
-        if (lineEnd < 0) return request.path();
+        if (lineEnd < 0) return "";
         String reqLine = reqStr.substring(0, lineEnd);
         int start = reqLine.indexOf(' ');
         int end = reqLine.lastIndexOf(" HTTP/");
         if (start >= 0 && end > start) {
             return reqLine.substring(start + 1, end);
         }
-        return request.path();
+        return "";
+    }
+
+    private String extractRequestPath(HttpRequestResponse reqResp) {
+        if (reqResp == null || reqResp.request() == null) return "";
+        return extractRequestPath(reqResp.request());
     }
 
     private static int parseStatusCode(String statusLine) {

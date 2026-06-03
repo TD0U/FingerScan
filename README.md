@@ -19,8 +19,9 @@
 
 | 模块 | 说明 |
 |------|------|
-| **被动指纹识别** | 代理流量自动匹配 YAML 规则库，识别 Spring、Swagger、Nacos、Jenkins 等 |
+| **被动指纹识别** | 代理流量自动匹配 YAML 规则库，识别 Spring、Swagger、Nacos、Jenkins 等；支持路径精确匹配 |
 | **Favicon Hash** | 自动采集网站图标，计算 MurmurHash3 / MD5，匹配已知应用指纹（兼容 Quake / FOFA） |
+| **全局响应过滤** | 自定义过滤正则，响应体命中时自动跳过指纹识别（拦截伪 200 响应、重放攻击告警等） |
 | **递归目录扫描** | 基于 URL 路径层级 x 规则路径列表组合扫描 |
 | **Payload 处理** | 对请求进行自定义变换（前缀/后缀/正则替换/条件断言）后重放 |
 | **路径收集** | 自动提取代理流量中的一级路径，统计命中主机数，可导出为字典 |
@@ -63,10 +64,11 @@
 
 ### 指纹管理
 
-管理 YAML 格式的指纹规则，包含两个子面板：
+管理 YAML 格式的指纹规则，包含三个子面板：
 
-- **正则规则** — 基于 URL + 正则表达式匹配响应体，支持增删改查、导入导出、批量启用/禁用
+- **正则规则** — 基于 URL + 正则表达式匹配响应体，支持增删改查、导入导出、批量启用/禁用。被动匹配时要求请求路径与规则 `url` 字段一致（`url` 为 `/` 时仅匹配响应内容）
 - **Icon Hash 规则** — 基于 MurmurHash3 / MD5 匹配 Favicon
+- **过滤规则** — 全局响应过滤器，正则命中响应体时跳过所有指纹识别（用于拦截"伪 200"响应、重放攻击告警等），支持增删改查
 <img width="1607" height="758" alt="image" src="https://github.com/user-attachments/assets/9c147ad6-746e-404a-b391-171dbf960ab4" />
 
 ### 图标数据
@@ -196,6 +198,20 @@ Icon_Hash_List:
 
 `murmur_hash` 和 `md5` 至少填写一个，Hash 值与 Quake / FOFA 格式兼容。
 
+### 过滤规则
+
+```yaml
+Filter_List:
+  - name: Response Body 404
+    re: '"status":404|"code":404'
+    loaded: true
+  - name: Replay Attack Detection
+    re: '"msg":"检测到重放攻击!"'
+    loaded: true
+```
+
+当响应体匹配任意已启用过滤规则的正则时，跳过该响应的所有指纹识别（正则匹配 + Icon Hash 匹配均跳过）。适用于某些系统始终返回 HTTP 200 但响应体内嵌真实错误码的场景。
+
 ## 编译构建
 
 **环境要求：** JDK 17+ 
@@ -244,7 +260,7 @@ BurpExtender (Montoya API)
 ScanOrchestrator
   ├── FilterChain (Method → Host → Suffix)
   └── ScanStrategy[]
-      ├── PassiveFingerprintStrategy    被动指纹匹配
+      ├── PassiveFingerprintStrategy    被动指纹匹配（支持路径精确匹配）
       ├── IconHashStrategy              Favicon 采集 + Hash
       ├── RecursiveDirectoryScanStrategy 递归目录扫描
       └── PayloadProcessingStrategy     Payload 变换
@@ -254,7 +270,12 @@ RequestPipeline
   ├── AnalysisPool (10 threads)  指纹匹配 + Hash 计算
   ├── DeduplicateFilter          URL 去重
   ├── QpsLimiter                 限速
+  ├── ResponseFilter             全局响应过滤器（Filter_List）
   └── ResultDispatcher           结果分发
+
+YamlRuleEngine
+  ├── 正则规则匹配（re + state + url 路径比对）
+  └── 全局过滤拦截（isResponseFiltered → 命中跳过所有规则）
 ```
 
 ## 致谢

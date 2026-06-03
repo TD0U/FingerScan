@@ -167,6 +167,45 @@ public class YamlConfigManager {
         }
     }
     
+    // ============================================================
+    // 全局过滤规则 CRUD
+    // ============================================================
+
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getFilterRules() {
+        Map<String, Object> yamlData = readYamlConfig();
+        List<Map<String, Object>> list = (List<Map<String, Object>>) yamlData.get("Filter_List");
+        return list != null ? list : new ArrayList<>();
+    }
+
+    public void addFilterRule(Map<String, Object> rule) {
+        Map<String, Object> yamlData = readYamlConfig();
+        List<Map<String, Object>> list = getFilterRules();
+        list.add(rule);
+        yamlData.put("Filter_List", list);
+        writeYamlConfig(yamlData);
+    }
+
+    public void updateFilterRule(int index, Map<String, Object> updatedRule) {
+        Map<String, Object> yamlData = readYamlConfig();
+        List<Map<String, Object>> list = getFilterRules();
+        if (index >= 0 && index < list.size()) {
+            list.set(index, updatedRule);
+            yamlData.put("Filter_List", list);
+            writeYamlConfig(yamlData);
+        }
+    }
+
+    public void removeFilterRule(int index) {
+        Map<String, Object> yamlData = readYamlConfig();
+        List<Map<String, Object>> list = getFilterRules();
+        if (index >= 0 && index < list.size()) {
+            list.remove(index);
+            yamlData.put("Filter_List", list);
+            writeYamlConfig(yamlData);
+        }
+    }
+
     /**
      * 从字符串解析YAML
      * @param yamlString YAML字符串

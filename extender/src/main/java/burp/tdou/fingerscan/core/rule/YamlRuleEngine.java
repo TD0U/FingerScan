@@ -3,6 +3,7 @@ package burp.tdou.fingerscan.core.rule;
 import burp.tdou.common.log.Logger;
 import burp.tdou.fingerscan.config.YamlConfigLoader;
 
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -30,13 +31,18 @@ public class YamlRuleEngine implements RuleEngine {
     }
 
     @Override
-    public List<MatchResult> match(byte[] request, byte[] response) {
+    public List<MatchResult> match(byte[] request, byte[] response, String requestPath) {
         if (response == null || response.length == 0) {
             return Collections.emptyList();
         }
 
         List<Map<String, Object>> rules = configLoader.getEnabledRules();
         if (rules.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 全局响应过滤器：匹配到过滤规则则跳过指纹识别
+        if (configLoader.isResponseFiltered(response)) {
             return Collections.emptyList();
         }
 
@@ -54,6 +60,11 @@ public class YamlRuleEngine implements RuleEngine {
                 }
 
                 if (!matchStatusCode(statusCode, getStringField(rule, "state"))) {
+                    continue;
+                }
+
+                // 路径比对：url 为 null、空或 "/" 时不限制路径，否则要求请求路径匹配
+                if (!matchPath(requestPath, getStringField(rule, "url"))) {
                     continue;
                 }
 
@@ -122,6 +133,34 @@ public class YamlRuleEngine implements RuleEngine {
             }
         }
         return -1;
+    }
+
+    /**
+     * 校验请求路径是否匹配规则的 url 字段
+     * url 为 null、空或 "/" 时忽略路径条件（始终匹配，纯内容正则）
+     */
+    private boolean matchPath(String requestPath, String ruleUrl) {
+        if (ruleUrl == null || ruleUrl.isEmpty() || "/".equals(ruleUrl)) {
+            return true;
+        }
+        if (requestPath == null || requestPath.isEmpty()) {
+            return false;
+        }
+        // 清理请求路径中的查询参数和锚点
+        String cleanPath = requestPath.split("\\?")[0].split("#")[0];
+        // 兼容完整 URL 格式（如 http://host/path），提取纯路径部分
+        if (cleanPath.startsWith("http://") || cleanPath.startsWith("https://")) {
+            try {
+                cleanPath = new URL(cleanPath).getPath();
+            } catch (Exception e) {
+                return false;
+            }
+        }
+        // 确保路径以 "/" 开头
+        if (!cleanPath.startsWith("/")) {
+            cleanPath = "/" + cleanPath;
+        }
+        return cleanPath.equals(ruleUrl);
     }
 
     /**

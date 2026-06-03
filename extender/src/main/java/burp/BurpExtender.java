@@ -69,7 +69,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -143,6 +145,7 @@ public class BurpExtender implements BurpExtension,
             // 1. 配置加载器（带缓存 + SafeConstructor）
             String yamlPath = Config.get("yaml_config_path");
             mYamlConfigLoader = new YamlConfigLoader(yamlPath);
+            initDefaultFilterRules();
 
             // 2. 规则引擎（仅 YAML）
             YamlRuleEngine yamlEngine = new YamlRuleEngine(mYamlConfigLoader);
@@ -173,7 +176,8 @@ public class BurpExtender implements BurpExtension,
                     mApi, ruleEngine,
                     TASK_THREAD_COUNT, ANALYSIS_THREAD_COUNT,
                     qpsLimit, qpsDelay,
-                    iconHashMatcher, mIconHashStore);
+                    iconHashMatcher, mIconHashStore,
+                    mYamlConfigLoader);
 
             // 4. 过滤器链
             FaviconRegistry faviconRegistry = new FaviconRegistry();
@@ -349,6 +353,33 @@ public class BurpExtender implements BurpExtension,
             mDataBoardTab.refreshTaskHistoryStatus();
         });
         mStatusRefresh.start();
+    }
+
+    /**
+     * 初始化默认全局过滤规则（仅当 Filter_List 为空时）
+     */
+    private void initDefaultFilterRules() {
+        if (mYamlConfigLoader == null) return;
+        List<Map<String, Object>> existing = mYamlConfigLoader.getFilterRules();
+        if (!existing.isEmpty()) return;
+
+        List<Map<String, Object>> defaults = new ArrayList<>();
+        Map<String, Object> rule1 = new HashMap<>();
+        rule1.put("name", "Response Body 404");
+        rule1.put("re", "\"status\":404|\"code\":404");
+        rule1.put("loaded", true);
+        defaults.add(rule1);
+
+        Map<String, Object> rule2 = new HashMap<>();
+        rule2.put("name", "Replay Attack Detection");
+        rule2.put("re", "\"msg\":\"检测到重放攻击!\"");
+        rule2.put("loaded", true);
+        defaults.add(rule2);
+
+        Map<String, Object> config = mYamlConfigLoader.readConfig();
+        config.put("Filter_List", defaults);
+        mYamlConfigLoader.writeConfig(config);
+        Logger.debug("Initialized default filter rules: %d rules", defaults.size());
     }
 
     /**

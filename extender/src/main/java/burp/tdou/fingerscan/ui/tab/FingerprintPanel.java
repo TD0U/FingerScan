@@ -10,6 +10,7 @@ package burp.tdou.fingerscan.ui.tab;
 
 import burp.tdou.fingerscan.common.Config;
 import burp.tdou.fingerscan.core.YamlConfigManager;
+import burp.tdou.fingerscan.ui.widget.FilterRuleDialog;
 import burp.tdou.fingerscan.ui.widget.FingerprintRuleDialog;
 import burp.tdou.fingerscan.ui.widget.IconHashRuleDialog;
 import burp.tdou.fingerscan.ui.widget.TestRuleDialog;
@@ -54,6 +55,12 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
     private TableRowSorter<DefaultTableModel> iconHashTableSorter;
     private JTextField iconHashSearchField;
     private JLabel iconHashCountLabel;
+
+    // 过滤规则 UI组件
+    private JTable filterTable;
+    private DefaultTableModel filterTableModel;
+    private TableRowSorter<DefaultTableModel> filterTableSorter;
+    private JLabel filterCountLabel;
     
     // 表格列名
     private static final String[] COLUMN_NAMES = {
@@ -62,6 +69,10 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
 
     private static final String[] ICON_HASH_COLUMN_NAMES = {
         "名称", "MurmurHash3", "MD5", "类型", "描述"
+    };
+
+    private static final String[] FILTER_COLUMN_NAMES = {
+        "名称", "正则表达式", "启用"
     };
     
     /**
@@ -74,6 +85,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
         initializeUI();
         loadFingerprintRules();
         loadIconHashRules();
+        loadFilterRules();
     }
 
     public void setOnReloadCallback(Runnable callback) {
@@ -107,6 +119,9 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
 
         // Tab 2: Icon Hash 规则
         tabbedPane.addTab("Icon Hash 规则", createIconHashPanel());
+
+        // Tab 3: 过滤规则
+        tabbedPane.addTab("过滤规则", createFilterPanel());
 
         add(tabbedPane, BorderLayout.CENTER);
     }
@@ -497,6 +512,15 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
             case "icon-hash-clear-search":
                 clearIconHashSearch();
                 break;
+            case "filter-add":
+                addFilterRule();
+                break;
+            case "filter-edit":
+                editFilterRule();
+                break;
+            case "filter-delete":
+                deleteFilterRule();
+                break;
         }
     }
     
@@ -522,6 +546,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
     private void reloadConfig() {
         loadFingerprintRules();
         loadIconHashRules();
+        loadFilterRules();
         if (onReloadCallback != null) {
             onReloadCallback.run();
         }
@@ -912,6 +937,145 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
     private void clearIconHashSearch() {
         iconHashSearchField.setText("");
         iconHashTableSorter.setRowFilter(null);
+    }
+
+    // ============================================================
+    // 全局过滤规则管理
+    // ============================================================
+
+    private JPanel createFilterPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+
+        filterTableModel = new DefaultTableModel(FILTER_COLUMN_NAMES, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return column == 2;
+            }
+
+            @Override
+            public Class<?> getColumnClass(int columnIndex) {
+                return columnIndex == 2 ? Boolean.class : String.class;
+            }
+        };
+
+        filterTable = new JTable(filterTableModel);
+        filterTableSorter = new TableRowSorter<>(filterTableModel);
+        filterTable.setRowSorter(filterTableSorter);
+        filterTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+
+        filterTable.getModel().addTableModelListener(e -> {
+            if (e.getColumn() == 2) {
+                int row = e.getFirstRow();
+                updateFilterRuleEnabledStatus(row);
+            }
+        });
+
+        int[] widths = {200, 350, 60};
+        for (int i = 0; i < widths.length && i < filterTable.getColumnCount(); i++) {
+            filterTable.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
+        }
+
+        JScrollPane scrollPane = new JScrollPane(filterTable);
+
+        // 按钮面板
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        buttonPanel.setBorder(new EmptyBorder(5, 0, 0, 0));
+        JButton addBtn = new JButton("添加");
+        addBtn.setActionCommand("filter-add");
+        addBtn.addActionListener(this);
+        buttonPanel.add(addBtn);
+        JButton editBtn = new JButton("编辑");
+        editBtn.setActionCommand("filter-edit");
+        editBtn.addActionListener(this);
+        buttonPanel.add(editBtn);
+        JButton deleteBtn = new JButton("删除");
+        deleteBtn.setActionCommand("filter-delete");
+        deleteBtn.addActionListener(this);
+        buttonPanel.add(deleteBtn);
+
+        buttonPanel.add(new JSeparator(SwingConstants.VERTICAL));
+
+        filterCountLabel = new JLabel("0");
+        buttonPanel.add(new JLabel("规则数量: "));
+        buttonPanel.add(filterCountLabel);
+
+        JPanel bottomPanel = new JPanel(new BorderLayout());
+        bottomPanel.add(buttonPanel, BorderLayout.NORTH);
+
+        panel.add(scrollPane, BorderLayout.CENTER);
+        panel.add(bottomPanel, BorderLayout.SOUTH);
+        return panel;
+    }
+
+    public void loadFilterRules() {
+        filterTableModel.setRowCount(0);
+        List<Map<String, Object>> rules = configManager.getFilterRules();
+        for (Map<String, Object> rule : rules) {
+            Object[] rowData = {
+                str(rule.get("name")),
+                str(rule.get("re")),
+                rule.get("loaded") == null || Boolean.TRUE.equals(rule.get("loaded"))
+            };
+            filterTableModel.addRow(rowData);
+        }
+        filterCountLabel.setText(String.valueOf(rules.size()));
+    }
+
+    private void updateFilterRuleEnabledStatus(int row) {
+        if (row < 0 || row >= filterTableModel.getRowCount()) return;
+        List<Map<String, Object>> rules = configManager.getFilterRules();
+        if (row < rules.size()) {
+            Map<String, Object> rule = rules.get(row);
+            rule.put("loaded", filterTableModel.getValueAt(row, 2));
+            configManager.updateFilterRule(row, rule);
+        }
+    }
+
+    private void addFilterRule() {
+        FilterRuleDialog dialog = new FilterRuleDialog(
+            (JFrame) SwingUtilities.getWindowAncestor(this), "添加过滤规则", null);
+        Map<String, Object> newRule = dialog.showDialog();
+        if (newRule != null) {
+            configManager.addFilterRule(newRule);
+            loadFilterRules();
+            onReloadCallback.run();  // 刷新运行时缓存
+        }
+    }
+
+    private void editFilterRule() {
+        int selectedRow = filterTable.getSelectedRow();
+        if (selectedRow < 0) {
+            JOptionPane.showMessageDialog(this, "请先选择要编辑的规则", "提示", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        int modelRow = filterTable.convertRowIndexToModel(selectedRow);
+        List<Map<String, Object>> rules = configManager.getFilterRules();
+        if (modelRow >= rules.size()) return;
+
+        FilterRuleDialog dialog = new FilterRuleDialog(
+            (JFrame) SwingUtilities.getWindowAncestor(this), "编辑过滤规则", rules.get(modelRow));
+        Map<String, Object> edited = dialog.showDialog();
+        if (edited != null) {
+            configManager.updateFilterRule(modelRow, edited);
+            loadFilterRules();
+            onReloadCallback.run();
+        }
+    }
+
+    private void deleteFilterRule() {
+        int selectedRow = filterTable.getSelectedRow();
+        if (selectedRow < 0) {
+            JOptionPane.showMessageDialog(this, "请先选择要删除的规则", "提示", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        int result = JOptionPane.showConfirmDialog(this, "确定要删除选中的过滤规则吗？", "确认删除",
+            JOptionPane.YES_NO_OPTION);
+        if (result == JOptionPane.YES_OPTION) {
+            int modelRow = filterTable.convertRowIndexToModel(selectedRow);
+            configManager.removeFilterRule(modelRow);
+            loadFilterRules();
+            onReloadCallback.run();
+        }
     }
 
     @Override
