@@ -1,5 +1,47 @@
 # 更新日志
 
+## 2026-06-04 (v3.0.5)
+
+### Bug 修复
+
+- **图标预览无法解析 8bpp/4bpp ICO 文件**
+
+  `parseDib()` 只处理了 32bpp 和 24bpp 格式，8bpp（256色调色板）和 4bpp（16色调色板）的 ICO 文件（如 ZKECO16.ico）解析返回 null，界面显示"无法解析图标"。
+
+  **修复**：新增 `parseDibPalette()` 方法，读取 DIB 头后的调色板并按索引映射像素，正确处理 4 字节行对齐。
+
+  涉及文件：
+  - `IconDataPanel.java` — `parseDib()` 增加 8bpp/4bpp 分支，新增 `parseDibPalette()` 方法
+
+### 优化
+
+- **图标来源表格支持右键复制 URL**
+
+  来源站点表格只存储 host 和 path，无法直接复制完整 URL。新增右键菜单"复制 URL"，自动拼接 host + path 为完整 URL 复制到剪贴板。
+
+  涉及文件：
+  - `IconDataPanel.java` — 来源表格添加右键弹出菜单
+
+- **路径收集面板支持框选单元格复制**
+
+  原来只能多选整行，无法单独框选路径列。改为单元格级别选择模式（`setCellSelectionEnabled`），支持鼠标拖选任意单元格区域，Ctrl+C 或右键"复制选中内容"复制选中单元格，多列时 Tab 分隔，多行时换行分隔。
+
+  涉及文件：
+  - `PathCollectPanel.java` — 改为单元格选择模式，新增 `copySelectedCells()` 方法
+
+## 2026-05-22 (v3.0.4)
+
+### Bug 修复
+
+- **Repeater/Intruder 中右键「Send to FingerScan」无效**
+
+  在 Repeater、Intruder 等消息编辑器中右键发送时，`event.selectedRequestResponses()` 返回空列表（该方法仅适用于 Proxy History、Site Map 等列表视图），导致右键菜单点击后没有任何请求被提交到扫描流程。
+
+  **修复**：当 `selectedRequestResponses()` 为空时，回退到 `event.messageEditorRequestResponse()` 获取当前编辑器中的请求响应对。
+
+  涉及文件：
+  - `BurpExtender.java` — 右键菜单 ActionListener 增加 `messageEditorRequestResponse()` 回退逻辑
+
 ## 2026-05-09 (v3.0.3)
 
 ### Bug 修复

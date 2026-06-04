@@ -58,7 +58,15 @@ public class Config {
 
     public static void init(String wordDir) {
         sWorkDir = wordDir;
-        sConfigPath = getWorkDir() + "config.json";
+        // 确保工作目录存在
+        String workDir = getWorkDir();
+        File workDirFile = new File(workDir);
+        if (!workDirFile.exists()) {
+            FileUtils.mkdirs(workDirFile);
+        }
+        // 首次加载时从 JAR 释放默认指纹配置
+        extractDefaultYamlConfig(workDir);
+        sConfigPath = workDir + "config.json";
         sConfigManager = new ConfigManager(sConfigPath);
         initDefaultConfig(Config.KEY_VERSION, Constants.PLUGIN_VERSION);
         initDefaultConfig(Config.KEY_QPS_LIMIT, "1024");
@@ -86,6 +94,7 @@ public class Config {
         initDefaultConfig(Config.KEY_ENABLE_REPLACE_HEADER, "true");
         initDefaultConfig(Config.KEY_ENABLE_PAYLOAD_PROCESSING, "true");
         initDefaultConfig(Config.KEY_ENABLE_ACTIVE_SCAN, "true");
+        initDefaultConfig("yaml_config_path", getWorkDir() + "Config_yaml.yaml");
         // 初始化数据收集管理
         // 初始化字典管理
         WordlistManager.init(get(Config.KEY_WORDLIST_PATH));
@@ -292,6 +301,22 @@ public class Config {
             return sWorkDir;
         }
         return PathUtils.getUserHome() + ".config" + File.separator + "FingerScan" + File.separator;
+    }
+
+    private static void extractDefaultYamlConfig(String workDir) {
+        String yamlPath = workDir + "Config_yaml.yaml";
+        File yamlFile = new File(yamlPath);
+        if (yamlFile.exists()) {
+            return;
+        }
+        try (InputStream is = Config.class.getClassLoader().getResourceAsStream("Config_yaml.yaml")) {
+            if (is != null) {
+                FileUtils.writeFile(is, yamlFile);
+                Logger.info("Default fingerprint config extracted to: %s", yamlPath);
+            }
+        } catch (Exception e) {
+            Logger.error("Failed to extract default yaml config: %s", e.getMessage());
+        }
     }
 
     public static String getVersion() {

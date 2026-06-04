@@ -8,6 +8,7 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.awt.datatransfer.StringSelection;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.util.HashMap;
@@ -120,6 +121,24 @@ public class IconDataPanel extends JPanel {
             public boolean isCellEditable(int row, int column) { return false; }
         };
         sourceTable = new JTable(sourceTableModel);
+
+        // 右键菜单：复制 URL
+        JPopupMenu sourceMenu = new JPopupMenu();
+        JMenuItem copyUrlItem = new JMenuItem("复制 URL");
+        copyUrlItem.addActionListener(e -> {
+            int row = sourceTable.getSelectedRow();
+            if (row < 0) return;
+            int modelRow = sourceTable.convertRowIndexToModel(row);
+            String host = (String) sourceTableModel.getValueAt(modelRow, 0);
+            String path = (String) sourceTableModel.getValueAt(modelRow, 1);
+            if (host == null) return;
+            String url = host.startsWith("http") ? host + path : "https://" + host + path;
+            Toolkit.getDefaultToolkit().getSystemClipboard()
+                    .setContents(new StringSelection(url), null);
+        });
+        sourceMenu.add(copyUrlItem);
+        sourceTable.setComponentPopupMenu(sourceMenu);
+
         JScrollPane sourceScroll = new JScrollPane(sourceTable);
         sourceScroll.setBorder(BorderFactory.createTitledBorder("来源站点"));
         detailPanel.add(sourceScroll, BorderLayout.CENTER);
@@ -260,9 +279,9 @@ public class IconDataPanel extends JPanel {
             int width = readInt32LE(dib, 4);
             int height = readInt32LE(dib, 8) / 2; // ICO 中 height 是实际高度的两倍（含 mask）
             int bpp = readUint16LE(dib, 14);
+            int colorsUsed = readInt32LE(dib, 32);
 
             if (width <= 0 || width > 256 || height <= 0 || height > 256) {
-                // 宽高为0时取目录项的值
                 int w = icoData[dirOffset] & 0xFF;
                 int h = icoData[dirOffset + 1] & 0xFF;
                 width = w == 0 ? 256 : w;
@@ -273,10 +292,59 @@ public class IconDataPanel extends JPanel {
                 return parseDib32(dib, width, height);
             } else if (bpp == 24) {
                 return parseDib24(dib, width, height);
+            } else if (bpp == 8) {
+                int paletteSize = (colorsUsed > 0 && colorsUsed <= 256) ? colorsUsed : 256;
+                return parseDibPalette(dib, width, height, paletteSize, 1);
+            } else if (bpp == 4) {
+                int paletteSize = (colorsUsed > 0 && colorsUsed <= 16) ? colorsUsed : 16;
+                return parseDibPalette(dib, width, height, paletteSize, 0);
             }
         } catch (Exception ignored) {
         }
         return null;
+    }
+
+    private BufferedImage parseDibPalette(byte[] dib, int width, int height, int paletteSize, int bppMode) {
+        // bppMode: 1=8bpp, 0=4bpp
+        int paletteOffset = 40;
+        int[] palette = new int[paletteSize];
+        for (int i = 0; i < paletteSize; i++) {
+            int pos = paletteOffset + i * 4;
+            if (pos + 3 >= dib.length) break;
+            int b = dib[pos] & 0xFF;
+            int g = dib[pos + 1] & 0xFF;
+            int r = dib[pos + 2] & 0xFF;
+            palette[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+        }
+
+        int dataOffset = paletteOffset + paletteSize * 4;
+        BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+
+        if (bppMode == 1) {
+            // 8bpp: 每字节一个像素索引
+            int rowSize = ((width + 3) / 4) * 4;
+            if (dataOffset + rowSize * height > dib.length) return null;
+            for (int y = height - 1; y >= 0; y--) {
+                for (int x = 0; x < width; x++) {
+                    int pos = dataOffset + (height - 1 - y) * rowSize + x;
+                    int idx = dib[pos] & 0xFF;
+                    img.setRGB(x, y, idx < palette.length ? palette[idx] : 0xFF000000);
+                }
+            }
+        } else {
+            // 4bpp: 每字节两个像素索引
+            int rowSize = ((width + 7) / 8) * 4;
+            if (dataOffset + rowSize * height > dib.length) return null;
+            for (int y = height - 1; y >= 0; y--) {
+                for (int x = 0; x < width; x++) {
+                    int pos = dataOffset + (height - 1 - y) * rowSize + x / 2;
+                    int b = dib[pos] & 0xFF;
+                    int idx = (x % 2 == 0) ? (b >> 4) & 0x0F : b & 0x0F;
+                    img.setRGB(x, y, idx < palette.length ? palette[idx] : 0xFF000000);
+                }
+            }
+        }
+        return img;
     }
 
     private BufferedImage parseDib32(byte[] dib, int width, int height) {

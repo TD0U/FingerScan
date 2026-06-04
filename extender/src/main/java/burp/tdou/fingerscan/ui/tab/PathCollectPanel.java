@@ -8,6 +8,7 @@ import javax.swing.border.TitledBorder;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 import java.awt.*;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
@@ -62,8 +63,25 @@ public class PathCollectPanel extends JPanel implements ActionListener, KeyListe
         pathTable = new JTable(tableModel);
         tableSorter = new TableRowSorter<>(tableModel);
         pathTable.setRowSorter(tableSorter);
+        // 允许单元格级别框选
+        pathTable.setCellSelectionEnabled(true);
         pathTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         pathTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+
+        // 右键菜单：复制选中单元格
+        JPopupMenu popupMenu = new JPopupMenu();
+        JMenuItem copyPathItem = new JMenuItem("复制选中内容");
+        copyPathItem.addActionListener(e -> copySelectedCells());
+        popupMenu.add(copyPathItem);
+        pathTable.setComponentPopupMenu(popupMenu);
+
+        // Ctrl+C 复制选中单元格
+        pathTable.getInputMap(JComponent.WHEN_FOCUSED).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_C, java.awt.event.InputEvent.CTRL_DOWN_MASK), "copyCells");
+        pathTable.getActionMap().put("copyCells", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) { copySelectedCells(); }
+        });
 
         int[] widths = {150, 300, 80, 160, 160};
         for (int i = 0; i < widths.length && i < pathTable.getColumnCount(); i++) {
@@ -180,6 +198,26 @@ public class PathCollectPanel extends JPanel implements ActionListener, KeyListe
                     "错误", JOptionPane.ERROR_MESSAGE);
             }
         }
+    }
+
+    private void copySelectedCells() {
+        int[] selectedRows = pathTable.getSelectedRows();
+        int[] selectedCols = pathTable.getSelectedColumns();
+        if (selectedRows.length == 0 || selectedCols.length == 0) return;
+        StringBuilder sb = new StringBuilder();
+        for (int viewRow : selectedRows) {
+            int modelRow = pathTable.convertRowIndexToModel(viewRow);
+            StringBuilder rowSb = new StringBuilder();
+            for (int viewCol : selectedCols) {
+                int modelCol = pathTable.convertColumnIndexToModel(viewCol);
+                Object val = tableModel.getValueAt(modelRow, modelCol);
+                if (rowSb.length() > 0) rowSb.append("\t");
+                rowSb.append(val != null ? val.toString() : "");
+            }
+            sb.append(rowSb).append("\n");
+        }
+        Toolkit.getDefaultToolkit().getSystemClipboard()
+                .setContents(new StringSelection(sb.toString().trim()), null);
     }
 
     private void deleteSelected() {

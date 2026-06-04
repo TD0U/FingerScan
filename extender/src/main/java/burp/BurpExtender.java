@@ -16,6 +16,7 @@ import burp.api.montoya.proxy.http.ProxyResponseReceivedAction;
 import burp.api.montoya.proxy.http.ProxyResponseToBeSentAction;
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent;
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
+import burp.api.montoya.ui.contextmenu.MessageEditorHttpRequestResponse;
 import burp.api.montoya.ui.editor.HttpRequestEditor;
 import burp.api.montoya.ui.editor.HttpResponseEditor;
 
@@ -70,6 +71,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -328,6 +330,14 @@ public class BurpExtender implements BurpExtension,
                 items.add(sendToFingerScanItem);
                 sendToFingerScanItem.addActionListener((e) -> new Thread(() -> {
                     List<HttpRequestResponse> messages = event.selectedRequestResponses();
+                    // Repeater/Intruder 等编辑器中右键时 selectedRequestResponses() 为空，
+                    // 需要从 messageEditorRequestResponse() 获取
+                    if (messages.isEmpty()) {
+                        Optional<MessageEditorHttpRequestResponse> editorReqResp = event.messageEditorRequestResponse();
+                        if (editorReqResp.isPresent()) {
+                            messages = List.of(editorReqResp.get().requestResponse());
+                        }
+                    }
                     for (HttpRequestResponse httpReqResp : messages) {
                         submitToOrchestrator(httpReqResp, ScanRequest.FROM_SEND);
                         if (mOrchestrator != null && mOrchestrator.getPipeline().isShutdown()) {
