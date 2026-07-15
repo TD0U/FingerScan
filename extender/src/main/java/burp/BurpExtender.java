@@ -49,7 +49,7 @@ import burp.tdou.fingerscan.core.strategy.PassiveFingerprintStrategy;
 import burp.tdou.fingerscan.core.strategy.PayloadProcessingStrategy;
 import burp.tdou.fingerscan.core.strategy.RecursiveDirectoryScanStrategy;
 import burp.tdou.fingerscan.core.strategy.IconHashStrategy;
-import burp.tdou.fingerscan.config.YamlConfigLoader;
+import burp.tdou.fingerscan.config.YamlConfigStore;
 import burp.tdou.fingerscan.filter.FilterChain;
 import burp.tdou.fingerscan.filter.HostFilter;
 import burp.tdou.fingerscan.filter.MethodFilter;
@@ -91,7 +91,7 @@ public class BurpExtender implements BurpExtension,
 
     // v3.0 新架构核心组件
     private ScanOrchestrator mOrchestrator;
-    private YamlConfigLoader mYamlConfigLoader;
+    private YamlConfigStore mYamlConfigStore;
     private RecursiveDirectoryScanStrategy mRecursiveStrategy;
     private PayloadProcessingStrategy mPayloadStrategy;
     private IconHashStore mIconHashStore;
@@ -142,17 +142,17 @@ public class BurpExtender implements BurpExtension,
      */
     private void initNewArchitecture() {
         try {
-            // 1. 配置加载器（带缓存 + SafeConstructor）
+            // 1. 配置存储（单一运行时 YamlConfigStore 实例）
             String yamlPath = Config.get("yaml_config_path");
-            mYamlConfigLoader = new YamlConfigLoader(yamlPath);
+            mYamlConfigStore = new YamlConfigStore(yamlPath);
 
             // 2. 规则引擎（仅 YAML）
-            YamlRuleEngine yamlEngine = new YamlRuleEngine(mYamlConfigLoader);
+            YamlRuleEngine yamlEngine = new YamlRuleEngine(mYamlConfigStore);
             CompositeRuleEngine ruleEngine = new CompositeRuleEngine()
                     .register(yamlEngine);
 
             // 2.5 Icon Hash 组件
-            mIconHashRuleLoader = new IconHashRuleLoader(mYamlConfigLoader);
+            mIconHashRuleLoader = new IconHashRuleLoader(mYamlConfigStore);
             mIconHashRuleLoader.loadRules();
             IconHashMatcher iconHashMatcher = new IconHashMatcher(mIconHashRuleLoader);
             String workDir = getWorkDir();
@@ -250,7 +250,7 @@ public class BurpExtender implements BurpExtension,
 
     @SuppressWarnings("deprecation")
     private void initView() {
-        mFingerScan = new FingerScan();
+        mFingerScan = new FingerScan(mYamlConfigStore);
         mDataBoardTab = mFingerScan.getDataBoardTab();
         mFingerScan.getConfigPanel().setOnTabEventListener(this);
         // 将 DataBoardTab 传递给策略（读取 UI 开关状态）
@@ -275,27 +275,20 @@ public class BurpExtender implements BurpExtension,
         if (mIconHashStore != null) {
             mFingerScan.initIconDataPanel(mIconHashStore);
         }
-        // 注册图标面板"转为规则"后的刷新回调
-        if (mFingerScan.getIconDataPanel() != null && mIconHashRuleLoader != null) {
-            mFingerScan.getIconDataPanel().setOnRuleAddedCallback(() -> {
-                mYamlConfigLoader.invalidateCache();
-                mIconHashRuleLoader.invalidate();
-                mIconHashRuleLoader.loadRules();
-                if (mFingerScan.getFingerprintPanel() != null) {
-                    mFingerScan.getFingerprintPanel().loadIconHashRules();
-                }
-            });
-        }
         // 初始化路径收集面板
         if (mPathStore != null) {
             mFingerScan.initPathCollectPanel(mPathStore);
         }
-        // 注册重新加载回调，刷新运行时ICO规则
-        if (mFingerScan.getFingerprintPanel() != null && mIconHashRuleLoader != null) {
-            mFingerScan.getFingerprintPanel().setOnReloadCallback(() -> {
-                mYamlConfigLoader.invalidateCache();
-                mIconHashRuleLoader.invalidate();
-                mIconHashRuleLoader.loadRules();
+        // 写操作后自动刷新 IconHash 规则与指纹面板 icon 表
+        if (mYamlConfigStore != null) {
+            mYamlConfigStore.addChangeListener(() -> {
+                if (mIconHashRuleLoader != null) {
+                    mIconHashRuleLoader.invalidate();
+                    mIconHashRuleLoader.loadRules();
+                }
+                if (mFingerScan != null && mFingerScan.getFingerprintPanel() != null) {
+                    mFingerScan.getFingerprintPanel().loadIconHashRules();
+                }
             });
         }
     }

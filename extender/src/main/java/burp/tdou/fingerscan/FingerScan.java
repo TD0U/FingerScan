@@ -3,8 +3,7 @@ package burp.tdou.fingerscan;
 import burp.tdou.common.log.Logger;
 import burp.tdou.fingerscan.common.Config;
 import burp.tdou.fingerscan.common.Constants;
-import burp.tdou.fingerscan.config.YamlConfigLoader;
-import burp.tdou.fingerscan.core.YamlConfigManager;
+import burp.tdou.fingerscan.config.YamlConfigStore;
 import burp.tdou.fingerscan.core.iconhash.IconHashStore;
 import burp.tdou.fingerscan.core.path.PathStore;
 import burp.tdou.fingerscan.ui.tab.ConfigPanel;
@@ -27,10 +26,11 @@ public class FingerScan extends JTabbedPane {
     private DataPanel mDataPanel;
     private IconDataPanel mIconDataPanel;
     private PathCollectPanel mPathCollectPanel;
-    private YamlConfigManager mConfigManager;
+    private YamlConfigStore mConfigStore;
 
-    public FingerScan() {
+    public FingerScan(YamlConfigStore configStore) {
         Logger.info(Constants.BANNER);
+        mConfigStore = configStore;
         initView();
     }
 
@@ -42,11 +42,7 @@ public class FingerScan extends JTabbedPane {
         addTab(mConfigPanel.getTitleName(), mConfigPanel);
 
         try {
-            String yamlPath = Config.get("yaml_config_path");
-            YamlConfigLoader loader = new YamlConfigLoader(yamlPath);
-            YamlConfigManager configManager = new YamlConfigManager(loader.getConfigFilePath());
-            mConfigManager = configManager;
-            mFingerprintPanel = new FingerprintPanel(configManager);
+            mFingerprintPanel = new FingerprintPanel(mConfigStore);
             addTab("指纹管理", mFingerprintPanel);
         } catch (Exception e) {
             Logger.debug("YAML 指纹面板初始化失败: %s", e.getMessage());
@@ -64,7 +60,7 @@ public class FingerScan extends JTabbedPane {
     public PathCollectPanel getPathCollectPanel() { return mPathCollectPanel; }
 
     public void initIconDataPanel(IconHashStore store) {
-        mIconDataPanel = new IconDataPanel(store, mConfigManager);
+        mIconDataPanel = new IconDataPanel(store, mConfigStore);
         addTab("图标数据", mIconDataPanel);
         mIconDataPanel.loadIcons();
     }
@@ -87,9 +83,10 @@ public class FingerScan extends JTabbedPane {
         } catch (Exception e) {
             Logger.error(e.getMessage());
         }
+        YamlConfigStore store = new YamlConfigStore(Config.get("yaml_config_path"));
         JFrame frame = new JFrame(Constants.PLUGIN_NAME + " v" + Constants.PLUGIN_VERSION);
         frame.setSize(1400, 700);
-        FingerScan fingerScan = new FingerScan();
+        FingerScan fingerScan = new FingerScan(store);
         fingerScan.getDataBoardTab().testInit();
         frame.setContentPane(fingerScan);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
