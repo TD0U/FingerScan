@@ -313,6 +313,9 @@ public class Config {
             if (is != null) {
                 FileUtils.writeFile(is, yamlFile);
                 Logger.info("Default fingerprint config extracted to: %s", yamlPath);
+            } else {
+                Logger.error("Built-in Config_yaml.yaml not found in classpath — "
+                        + "packaging error, plugin will start with empty fingerprint rules");
             }
         } catch (Exception e) {
             Logger.error("Failed to extract default yaml config: %s", e.getMessage());
