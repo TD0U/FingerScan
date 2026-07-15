@@ -1,7 +1,7 @@
 package burp.tdou.fingerscan.core.rule;
 
 import burp.tdou.common.log.Logger;
-import burp.tdou.fingerscan.config.YamlConfigLoader;
+import burp.tdou.fingerscan.config.YamlConfigStore;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -17,16 +17,16 @@ import java.util.regex.Pattern;
  *
  * 改进:
  * - Pattern 缓存避免重复编译
- * - 通过 YamlConfigLoader 使用带缓存的配置读取
+ * - 通过 YamlConfigStore 使用带缓存的配置读取
  * - 线程安全的 Pattern 缓存
  */
 public class YamlRuleEngine implements RuleEngine {
 
-    private final YamlConfigLoader configLoader;
+    private final YamlConfigStore configStore;
     private final ConcurrentHashMap<String, Pattern> patternCache = new ConcurrentHashMap<>();
 
-    public YamlRuleEngine(YamlConfigLoader configLoader) {
-        this.configLoader = configLoader;
+    public YamlRuleEngine(YamlConfigStore configStore) {
+        this.configStore = configStore;
     }
 
     @Override
@@ -35,7 +35,7 @@ public class YamlRuleEngine implements RuleEngine {
             return Collections.emptyList();
         }
 
-        List<Map<String, Object>> rules = configLoader.getEnabledRules();
+        List<Map<String, Object>> rules = configStore.getEnabledRules();
         if (rules.isEmpty()) {
             return Collections.emptyList();
         }
@@ -70,7 +70,7 @@ public class YamlRuleEngine implements RuleEngine {
 
     @Override
     public List<String> getScanPaths() {
-        return configLoader.getScanPaths();
+        return configStore.getScanPaths();
     }
 
     /**
