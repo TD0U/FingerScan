@@ -1,5 +1,60 @@
 # 更新日志
 
+## 2026-07-16 (v3.0.6)
+
+### 优化
+
+- **指纹 URL 精确匹配开关**
+
+  被动指纹识别默认对任意路径的响应均跑正则匹配，会产生大量无意义的误匹配（如 `/druid/login.html` 命中 Swagger 规则）。
+
+  新增开关「指纹 URL 匹配」（默认关闭），开启后规则的 `url` 字段不为空且不为 `"/"` 时，要求请求路径与规则 `url` 精确匹配才进行正则匹配；`url` 为空或 `"/"` 的规则不受影响，始终匹配。路径匹配自动清除查询参数和锚点，兼容完整 URL 格式。
+
+  涉及文件：
+  - `Config.java` — 新增 `KEY_FINGERPRINT_URL_MATCH`，默认 `false`
+  - `RuleEngine.java` — 接口新增 `match(req, resp, requestPath)` 签名，旧签名保留为 default 方法兼容
+  - `YamlRuleEngine.java` — 实现新签名，新增 `matchPath()` 方法
+  - `CompositeRuleEngine.java` — 透传 `requestPath`
+  - `RequestPipeline.java` — 两处 `match()` 补传请求路径，`extractRequestPath()` 优先使用 Montoya `request.path()`
+  - `OtherTab.java` — 在「最大显示长度」下方新增开关 UI
+  - `messages_zh_CN.properties` / `messages_en_US.properties` — 开关文案
+
+### 架构重构
+
+- **YAML 配置统一为单一数据源 `YamlConfigStore`**
+
+  原先同一份 `Config_yaml.yaml` 被 `YamlConfigLoader`（运行时）与 `YamlConfigManager`（UI）两套实现分别持有，各自缓存、互不通知，UI 改规则后运行时常靠 mtime 巧合才刷新；`BurpExtender` 里还需要人肉 `invalidateCache()` 打补丁。
+
+  **改动**：
+  - 新增 `YamlConfigStore`：读（mtime 缓存）+ 写（index 级 CRUD）+ `mergeUpdate` + 变更监听，全局唯一
+  - `BurpExtender` 创建并注入到 `FingerScan`、`YamlRuleEngine`、`IconHashRuleLoader` 与 UI 面板
+  - 写盘成功后自动 `notifyListeners`，`IconHashRuleLoader` 索引与图标规则表自动重建
+  - 删除 `YamlConfigLoader`、`YamlConfigManager` 及 `setOnReloadCallback` / `setOnRuleAddedCallback`
+
+  涉及文件：
+  - `YamlConfigStore.java`（新增）
+  - `BurpExtender.java`、`FingerScan.java`
+  - `YamlRuleEngine.java`、`IconHashRuleLoader.java`
+  - `FingerprintPanel.java`、`IconDataPanel.java`
+  - 删除 `YamlConfigLoader.java`、`YamlConfigManager.java`
+
+### Bug 修复
+
+- **导入指纹规则会抹掉 `Icon_Hash_List`**
+
+  旧 `mergeUpdateYamlConfig` 合并后只写回 `Load_List` 与 `Bypass_List`，整文件覆盖导致已有 Icon Hash 规则丢失。
+
+  **修复**：`YamlConfigStore.mergeUpdate` 以完整旧配置为底合并，保留 `Icon_Hash_List` 及未知键；导入侧若含图标规则则按 name+hash 去重追加。
+
+- **Gradle 产物版本与插件显示不一致 / 内置指纹库未打进 jar**
+
+  `build.gradle` 仍为 `3.0.4`，而 `Constants`/`pom`/CHANGELOG 已是 `3.0.5`；`Config_yaml.yaml` 放在 `src/main/java/yaml/` 未进入 Gradle resources，首次安装无法释放默认指纹库。
+
+  **修复**：
+  - 版本号统一（本版起为 `3.0.6`：`Constants` / `build.gradle` / `extender/pom.xml`）
+  - `Config_yaml.yaml` 移至 `src/main/resources/`
+  - 内置 yaml 缺失时打 `Logger.error` 告警，不再静默
+
 ## 2026-06-04 (v3.0.5)
 
 ### Bug 修复

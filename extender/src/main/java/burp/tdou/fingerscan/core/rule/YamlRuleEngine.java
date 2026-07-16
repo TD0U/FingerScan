@@ -1,8 +1,10 @@
 package burp.tdou.fingerscan.core.rule;
 
 import burp.tdou.common.log.Logger;
-import burp.tdou.fingerscan.config.YamlConfigLoader;
+import burp.tdou.fingerscan.common.Config;
+import burp.tdou.fingerscan.config.YamlConfigStore;
 
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -17,25 +19,26 @@ import java.util.regex.Pattern;
  *
  * 改进:
  * - Pattern 缓存避免重复编译
- * - 通过 YamlConfigLoader 使用带缓存的配置读取
+ * - 通过 YamlConfigStore 使用带缓存的配置读取
  * - 线程安全的 Pattern 缓存
+ * - 可选的请求路径与规则 url 精确匹配
  */
 public class YamlRuleEngine implements RuleEngine {
 
-    private final YamlConfigLoader configLoader;
+    private final YamlConfigStore configStore;
     private final ConcurrentHashMap<String, Pattern> patternCache = new ConcurrentHashMap<>();
 
-    public YamlRuleEngine(YamlConfigLoader configLoader) {
-        this.configLoader = configLoader;
+    public YamlRuleEngine(YamlConfigStore configStore) {
+        this.configStore = configStore;
     }
 
     @Override
-    public List<MatchResult> match(byte[] request, byte[] response) {
+    public List<MatchResult> match(byte[] request, byte[] response, String requestPath) {
         if (response == null || response.length == 0) {
             return Collections.emptyList();
         }
 
-        List<Map<String, Object>> rules = configLoader.getEnabledRules();
+        List<Map<String, Object>> rules = configStore.getEnabledRules();
         if (rules.isEmpty()) {
             return Collections.emptyList();
         }
@@ -57,6 +60,10 @@ public class YamlRuleEngine implements RuleEngine {
                     continue;
                 }
 
+                if (!matchPath(requestPath, getStringField(rule, "url"))) {
+                    continue;
+                }
+
                 if (matchesRegex(responseStr, regex)) {
                     results.add(MatchResult.fromYamlRule(name, regex));
                 }
@@ -70,7 +77,7 @@ public class YamlRuleEngine implements RuleEngine {
 
     @Override
     public List<String> getScanPaths() {
-        return configLoader.getScanPaths();
+        return configStore.getScanPaths();
     }
 
     /**
@@ -137,6 +144,36 @@ public class YamlRuleEngine implements RuleEngine {
         } catch (NumberFormatException e) {
             return true;
         }
+    }
+
+    /**
+     * 校验请求路径是否匹配规则的 url 字段
+     * 开关关闭时始终返回 true；url 为 null、空或 "/" 时不限路径（始终匹配）
+     */
+    private boolean matchPath(String requestPath, String ruleUrl) {
+        if (!Config.getBoolean(Config.KEY_FINGERPRINT_URL_MATCH)) {
+            return true;
+        }
+        if (ruleUrl == null || ruleUrl.isEmpty() || "/".equals(ruleUrl)) {
+            return true;
+        }
+        if (requestPath == null || requestPath.isEmpty()) {
+            return false;
+        }
+        // 清理查询参数和锚点
+        String cleanPath = requestPath.split("\\?")[0].split("#")[0];
+        // 兼容完整 URL 格式（如 http://host/path）
+        if (cleanPath.startsWith("http://") || cleanPath.startsWith("https://")) {
+            try {
+                cleanPath = new URL(cleanPath).getPath();
+            } catch (Exception e) {
+                return false;
+            }
+        }
+        if (!cleanPath.startsWith("/")) {
+            cleanPath = "/" + cleanPath;
+        }
+        return cleanPath.equals(ruleUrl);
     }
 
     /**

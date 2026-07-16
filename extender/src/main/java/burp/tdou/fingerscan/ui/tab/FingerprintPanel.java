@@ -9,7 +9,7 @@
 package burp.tdou.fingerscan.ui.tab;
 
 import burp.tdou.fingerscan.common.Config;
-import burp.tdou.fingerscan.core.YamlConfigManager;
+import burp.tdou.fingerscan.config.YamlConfigStore;
 import burp.tdou.fingerscan.ui.widget.FingerprintRuleDialog;
 import burp.tdou.fingerscan.ui.widget.IconHashRuleDialog;
 import burp.tdou.fingerscan.ui.widget.TestRuleDialog;
@@ -29,9 +29,8 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 public class FingerprintPanel extends JPanel implements ActionListener, KeyListener {
-    
-    private YamlConfigManager configManager;
-    private Runnable onReloadCallback;
+
+    private YamlConfigStore configStore;
 
     // UI组件
     private JTable fingerprintTable;
@@ -66,18 +65,13 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
     
     /**
      * 构造函数
-     * @param configManager YAML配置管理器
-     * @param scanner 指纹扫描器
+     * @param configStore YAML配置存储
      */
-    public FingerprintPanel(YamlConfigManager configManager) {
-        this.configManager = configManager;
+    public FingerprintPanel(YamlConfigStore configStore) {
+        this.configStore = configStore;
         initializeUI();
         loadFingerprintRules();
         loadIconHashRules();
-    }
-
-    public void setOnReloadCallback(Runnable callback) {
-        this.onReloadCallback = callback;
     }
 
     /**
@@ -122,7 +116,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
         JPanel pathPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         pathPanel.add(new JLabel("配置文件路径:"));
         
-        configPathField = new JTextField(configManager.getConfigFilePath(), 30);
+        configPathField = new JTextField(configStore.getConfigFilePath(), 30);
         configPathField.setEditable(false);
         pathPanel.add(configPathField);
         
@@ -285,7 +279,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
     public void loadFingerprintRules() {
         tableModel.setRowCount(0);
 
-        List<Map<String, Object>> rules = configManager.getFingerprintRules();
+        List<Map<String, Object>> rules = configStore.getFingerprintRules();
 
         for (int i = 0; i < rules.size(); i++) {
             Map<String, Object> rule = rules.get(i);
@@ -397,11 +391,11 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
 
         Boolean enabled = (Boolean) tableModel.getValueAt(row, 2);
 
-        List<Map<String, Object>> rules = configManager.getFingerprintRules();
+        List<Map<String, Object>> rules = configStore.getFingerprintRules();
         if (row < rules.size()) {
             Map<String, Object> rule = rules.get(row);
             rule.put("loaded", enabled);
-            configManager.updateFingerprintRule(row, rule);
+            configStore.updateRule(row, rule);
         }
     }
 
@@ -434,7 +428,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
     private Map<String, Object> getSelectedRule() {
         int modelRow = getSelectedModelIndex();
         if (modelRow < 0) return null;
-        List<Map<String, Object>> rules = configManager.getFingerprintRules();
+        List<Map<String, Object>> rules = configStore.getFingerprintRules();
         return modelRow < rules.size() ? rules.get(modelRow) : null;
     }
     
@@ -509,7 +503,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
 
         if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             String selectedPath = fileChooser.getSelectedFile().getAbsolutePath();
-            configManager.setConfigFilePath(selectedPath);
+            configStore.setConfigFilePath(selectedPath);
             Config.put("yaml_config_path", selectedPath);
             configPathField.setText(selectedPath);
             reloadConfig();
@@ -522,9 +516,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
     private void reloadConfig() {
         loadFingerprintRules();
         loadIconHashRules();
-        if (onReloadCallback != null) {
-            onReloadCallback.run();
-        }
+        // path change already notified via setConfigFilePath → listeners
         JOptionPane.showMessageDialog(this, "配置重新加载成功！", "提示", JOptionPane.INFORMATION_MESSAGE);
     }
     
@@ -541,7 +533,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
         Map<String, Object> newRule = dialog.showDialog();
         if (newRule != null) {
             try {
-                configManager.addFingerprintRule(newRule);
+                configStore.addRule(newRule);
                 
                 // 刷新表格
                 loadFingerprintRules();
@@ -573,7 +565,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
         Map<String, Object> editedRule = dialog.showDialog();
         if (editedRule != null) {
             try {
-                configManager.updateFingerprintRule(modelIndex, editedRule);
+                configStore.updateRule(modelIndex, editedRule);
                 loadFingerprintRules();
                 JOptionPane.showMessageDialog(this, "规则更新成功！", "成功", JOptionPane.INFORMATION_MESSAGE);
             } catch (Exception e) {
@@ -604,7 +596,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
                 // 从后往前删除，避免索引变化
                 for (int i = selectedRows.length - 1; i >= 0; i--) {
                     int modelRow = fingerprintTable.convertRowIndexToModel(selectedRows[i]);
-                    configManager.removeFingerprintRule(modelRow);
+                    configStore.removeRule(modelRow);
                 }
                 
                 // 刷新表格
@@ -633,14 +625,14 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
         
         try {
             int modelRow = fingerprintTable.convertRowIndexToModel(selectedRow);
-            List<Map<String, Object>> rules = configManager.getFingerprintRules();
+            List<Map<String, Object>> rules = configStore.getFingerprintRules();
             if (modelRow >= rules.size()) return;
 
             Map<String, Object> copiedRule = new HashMap<>(rules.get(modelRow));
             copiedRule.remove("id");
             copiedRule.put("name", copiedRule.get("name") + " (副本)");
 
-            configManager.addFingerprintRule(copiedRule);
+            configStore.addRule(copiedRule);
             loadFingerprintRules();
             
             JOptionPane.showMessageDialog(this, "规则复制成功！", "成功", JOptionPane.INFORMATION_MESSAGE);
@@ -656,23 +648,23 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
     private void importConfig() {
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("YAML文件", "yaml", "yml"));
-        
+
         if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             try {
                 String importPath = fileChooser.getSelectedFile().getAbsolutePath();
-                YamlConfigManager importManager = new YamlConfigManager(importPath);
-                Map<String, Object> importData = importManager.readYamlConfig();
-                
-                configManager.mergeUpdateYamlConfig(importData);
+                YamlConfigStore importStore = new YamlConfigStore(importPath);
+                Map<String, Object> importData = importStore.readConfig();
+
+                configStore.mergeUpdate(importData);
                 loadFingerprintRules();
-                
+
                 JOptionPane.showMessageDialog(this, "配置导入成功！", "提示", JOptionPane.INFORMATION_MESSAGE);
             } catch (Exception ex) {
                 JOptionPane.showMessageDialog(this, "导入失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
             }
         }
     }
-    
+
     /**
      * 导出配置
      */
@@ -680,15 +672,15 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("YAML文件", "yaml", "yml"));
         fileChooser.setSelectedFile(new java.io.File("fingerprint_rules_export.yaml"));
-        
+
         if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
             try {
                 String exportPath = fileChooser.getSelectedFile().getAbsolutePath();
-                Map<String, Object> configData = configManager.readYamlConfig();
-                
-                YamlConfigManager exportManager = new YamlConfigManager(exportPath);
-                exportManager.writeYamlConfig(configData);
-                
+                Map<String, Object> configData = configStore.readConfig();
+
+                YamlConfigStore exportStore = new YamlConfigStore(exportPath);
+                exportStore.writeConfig(configData);
+
                 JOptionPane.showMessageDialog(this, "配置导出成功！", "提示", JOptionPane.INFORMATION_MESSAGE);
             } catch (Exception ex) {
                 JOptionPane.showMessageDialog(this, "导出失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
@@ -835,7 +827,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
 
     public void loadIconHashRules() {
         iconHashTableModel.setRowCount(0);
-        List<Map<String, Object>> rules = configManager.getIconHashRules();
+        List<Map<String, Object>> rules = configStore.getIconHashRules();
         for (Map<String, Object> rule : rules) {
             Object[] rowData = {
                 rule.get("name"),
@@ -854,7 +846,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
             (JFrame) SwingUtilities.getWindowAncestor(this), "添加 Icon Hash 规则", null);
         Map<String, Object> newRule = dialog.showDialog();
         if (newRule != null) {
-            configManager.addIconHashRule(newRule);
+            configStore.addIconHashRule(newRule);
             loadIconHashRules();
         }
     }
@@ -866,14 +858,14 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
             return;
         }
         int modelRow = iconHashTable.convertRowIndexToModel(selectedRow);
-        List<Map<String, Object>> rules = configManager.getIconHashRules();
+        List<Map<String, Object>> rules = configStore.getIconHashRules();
         if (modelRow >= rules.size()) return;
 
         IconHashRuleDialog dialog = new IconHashRuleDialog(
             (JFrame) SwingUtilities.getWindowAncestor(this), "编辑 Icon Hash 规则", rules.get(modelRow));
         Map<String, Object> edited = dialog.showDialog();
         if (edited != null) {
-            configManager.updateIconHashRule(modelRow, edited);
+            configStore.updateIconHashRule(modelRow, edited);
             loadIconHashRules();
         }
     }
@@ -888,7 +880,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
             JOptionPane.YES_NO_OPTION);
         if (result == JOptionPane.YES_OPTION) {
             int modelRow = iconHashTable.convertRowIndexToModel(selectedRow);
-            configManager.removeIconHashRule(modelRow);
+            configStore.removeIconHashRule(modelRow);
             loadIconHashRules();
         }
     }

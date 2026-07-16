@@ -1,7 +1,7 @@
 package burp.tdou.fingerscan.core.iconhash;
 
 import burp.tdou.common.log.Logger;
-import burp.tdou.fingerscan.config.YamlConfigLoader;
+import burp.tdou.fingerscan.config.YamlConfigStore;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -10,18 +10,18 @@ import java.util.Map;
 
 public class IconHashRuleLoader {
 
-    private final YamlConfigLoader configLoader;
+    private final YamlConfigStore configStore;
     private Map<String, List<IconHashRule>> murmurIndex = new HashMap<>();
     private Map<String, List<IconHashRule>> md5Index = new HashMap<>();
     private long lastLoadTime = 0;
 
-    public IconHashRuleLoader(YamlConfigLoader configLoader) {
-        this.configLoader = configLoader;
+    public IconHashRuleLoader(YamlConfigStore configStore) {
+        this.configStore = configStore;
     }
 
     @SuppressWarnings("unchecked")
     public void loadRules() {
-        Map<String, Object> config = configLoader.readConfig();
+        Map<String, Object> config = configStore.readConfig();
         if (config == null) {
             return;
         }

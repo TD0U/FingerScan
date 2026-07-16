@@ -30,11 +30,11 @@ public class CompositeRuleEngine implements RuleEngine {
     }
 
     @Override
-    public List<MatchResult> match(byte[] request, byte[] response) {
+    public List<MatchResult> match(byte[] request, byte[] response, String requestPath) {
         List<MatchResult> allResults = new ArrayList<>();
         for (RuleEngine engine : engines) {
             try {
-                List<MatchResult> results = engine.match(request, response);
+                List<MatchResult> results = engine.match(request, response, requestPath);
                 if (results != null) {
                     allResults.addAll(results);
                 }

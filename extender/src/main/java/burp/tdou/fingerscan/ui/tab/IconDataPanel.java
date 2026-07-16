@@ -1,7 +1,7 @@
 package burp.tdou.fingerscan.ui.tab;
 
 import burp.tdou.fingerscan.core.iconhash.IconHashStore;
-import burp.tdou.fingerscan.core.YamlConfigManager;
+import burp.tdou.fingerscan.config.YamlConfigStore;
 import burp.tdou.fingerscan.ui.widget.IconHashRuleDialog;
 
 import javax.swing.*;
@@ -19,8 +19,7 @@ import javax.imageio.ImageIO;
 public class IconDataPanel extends JPanel {
 
     private final IconHashStore store;
-    private final YamlConfigManager configManager;
-    private Runnable onRuleAddedCallback;
+    private final YamlConfigStore configStore;
     private JTable iconTable;
     private DefaultTableModel tableModel;
     private JLabel iconPreview;
@@ -33,14 +32,10 @@ public class IconDataPanel extends JPanel {
     };
     private static final String[] SOURCE_COLUMNS = {"Host", "路径", "发现时间"};
 
-    public IconDataPanel(IconHashStore store, YamlConfigManager configManager) {
+    public IconDataPanel(IconHashStore store, YamlConfigStore configStore) {
         this.store = store;
-        this.configManager = configManager;
+        this.configStore = configStore;
         initUI();
-    }
-
-    public void setOnRuleAddedCallback(Runnable callback) {
-        this.onRuleAddedCallback = callback;
     }
 
     private void initUI() {
@@ -400,7 +395,7 @@ public class IconDataPanel extends JPanel {
             JOptionPane.showMessageDialog(this, "请先选择要转换的图标", "提示", JOptionPane.WARNING_MESSAGE);
             return;
         }
-        if (configManager == null) {
+        if (configStore == null) {
             JOptionPane.showMessageDialog(this, "指纹配置管理器未初始化", "错误", JOptionPane.ERROR_MESSAGE);
             return;
         }
@@ -422,10 +417,7 @@ public class IconDataPanel extends JPanel {
         IconHashRuleDialog dialog = new IconHashRuleDialog(frame, "转为 Icon Hash 指纹规则", prefill);
         Map<String, Object> result = dialog.showDialog();
         if (result != null) {
-            configManager.addIconHashRule(result);
-            if (onRuleAddedCallback != null) {
-                onRuleAddedCallback.run();
-            }
+            configStore.addIconHashRule(result);
             String ruleName = String.valueOf(result.get("name"));
             String oldMatch = (String) tableModel.getValueAt(modelRow, 5);
             String newMatch;
