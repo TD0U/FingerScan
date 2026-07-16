@@ -49,9 +49,6 @@ public class RequestTab extends BaseConfigTab {
         addTextConfigPanel(L.get("include_method"), L.get("include_method_sub_title"), 20, Config.KEY_INCLUDE_METHOD);
         // 根据后缀过滤请求包
         addTextConfigPanel(L.get("exclude_suffix"), L.get("exclude_suffix_sub_title"), 50, Config.KEY_EXCLUDE_SUFFIX);
-        // 指纹 URL 精确匹配开关
-        addEnabledConfigPanel(L.get("fingerprint_url_match"), L.get("fingerprint_url_match_sub_title"),
-                Config.KEY_FINGERPRINT_URL_MATCH);
         // 请求头配置
         addWordListPanel(L.get("header"), L.get("header_sub_title"), WordlistManager.KEY_HEADERS);
         // 移除请求头配置

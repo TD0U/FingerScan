@@ -24,6 +24,9 @@ public class OtherTab extends BaseConfigTab {
         // 请求响应最大长度
         addTextConfigPanel(L.get("maximum_display_length"), L.get("maximum_display_length_sub_title"),
                 20, Config.KEY_MAX_DISPLAY_LENGTH).addKeyListener(new NumberFilter(8));
+        // 指纹 URL 精确匹配开关
+        addEnabledConfigPanel(L.get("fingerprint_url_match"), L.get("fingerprint_url_match_sub_title"),
+                Config.KEY_FINGERPRINT_URL_MATCH);
         addReadOnlyPathPanel(L.get("config_directory"), L.get("config_directory_sub_title"), Config.getWorkDir());
         addReadOnlyPathPanel(L.get("database_path"), L.get("database_path_sub_title"), Config.getWorkDir() + "icon_hash.db");
     }

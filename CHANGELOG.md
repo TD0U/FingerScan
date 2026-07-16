@@ -16,7 +16,7 @@
   - `YamlRuleEngine.java` — 实现新签名，新增 `matchPath()` 方法
   - `CompositeRuleEngine.java` — 透传 `requestPath`
   - `RequestPipeline.java` — 两处 `match()` 补传请求路径，`extractRequestPath()` 优先使用 Montoya `request.path()`
-  - `RequestTab.java` — 新增开关 UI
+  - `OtherTab.java` — 在「最大显示长度」下方新增开关 UI
   - `messages_zh_CN.properties` / `messages_en_US.properties` — 开关文案
 
 ### 架构重构
