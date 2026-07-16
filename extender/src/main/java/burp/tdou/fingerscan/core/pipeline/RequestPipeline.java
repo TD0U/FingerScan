@@ -107,8 +107,10 @@ public class RequestPipeline {
 
         pool.execute(() -> {
             try {
+                String requestPath = task.getReqResp() != null && task.getReqResp().request() != null
+                        ? extractRequestPath(task.getReqResp().request()) : "";
                 List<MatchResult> matches = ruleEngine.match(
-                        task.getExistingRequest(), task.getExistingResponse());
+                        task.getExistingRequest(), task.getExistingResponse(), requestPath);
 
                 // 无论是否匹配到指纹，都构建完整结果用于扫描记录
                 ScanResult.Builder builder = new ScanResult.Builder()
@@ -300,7 +302,7 @@ public class RequestPipeline {
         }
 
         byte[] reqBytes = request != null ? request.toByteArray().getBytes() : null;
-        List<MatchResult> matches = ruleEngine.match(reqBytes, respBytes);
+        List<MatchResult> matches = ruleEngine.match(reqBytes, respBytes, reqUrl);
 
         return new ScanResult.Builder()
                 .task(task)
@@ -352,18 +354,23 @@ public class RequestPipeline {
      */
     private String extractRequestPath(HttpRequest request) {
         if (request == null) return "";
-        // Parse from raw request header line
+        // 优先使用 Montoya API 的 path()，返回纯路径（如 /swagger-ui.html）
+        String path = request.path();
+        if (path != null && !path.isEmpty()) {
+            return path;
+        }
+        // 降级：从原始请求行解析
         String reqStr = request.toString();
         int lineEnd = reqStr.indexOf("\r\n");
         if (lineEnd < 0) lineEnd = reqStr.indexOf("\n");
-        if (lineEnd < 0) return request.path();
+        if (lineEnd < 0) return "";
         String reqLine = reqStr.substring(0, lineEnd);
         int start = reqLine.indexOf(' ');
         int end = reqLine.lastIndexOf(" HTTP/");
         if (start >= 0 && end > start) {
             return reqLine.substring(start + 1, end);
         }
-        return request.path();
+        return "";
     }
 
     private static int parseStatusCode(String statusLine) {

@@ -2,6 +2,23 @@
 
 ## 2026-07-16 (v3.0.6)
 
+### 优化
+
+- **指纹 URL 精确匹配开关**
+
+  被动指纹识别默认对任意路径的响应均跑正则匹配，会产生大量无意义的误匹配（如 `/druid/login.html` 命中 Swagger 规则）。
+
+  新增开关「指纹 URL 匹配」（默认关闭），开启后规则的 `url` 字段不为空且不为 `"/"` 时，要求请求路径与规则 `url` 精确匹配才进行正则匹配；`url` 为空或 `"/"` 的规则不受影响，始终匹配。路径匹配自动清除查询参数和锚点，兼容完整 URL 格式。
+
+  涉及文件：
+  - `Config.java` — 新增 `KEY_FINGERPRINT_URL_MATCH`，默认 `false`
+  - `RuleEngine.java` — 接口新增 `match(req, resp, requestPath)` 签名，旧签名保留为 default 方法兼容
+  - `YamlRuleEngine.java` — 实现新签名，新增 `matchPath()` 方法
+  - `CompositeRuleEngine.java` — 透传 `requestPath`
+  - `RequestPipeline.java` — 两处 `match()` 补传请求路径，`extractRequestPath()` 优先使用 Montoya `request.path()`
+  - `RequestTab.java` — 新增开关 UI
+  - `messages_zh_CN.properties` / `messages_en_US.properties` — 开关文案
+
 ### 架构重构
 
 - **YAML 配置统一为单一数据源 `YamlConfigStore`**

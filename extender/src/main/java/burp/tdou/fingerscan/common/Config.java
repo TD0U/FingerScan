@@ -48,6 +48,7 @@ public class Config {
     public static final String KEY_ENABLE_REPLACE_HEADER = "enable-replace-header";
     public static final String KEY_ENABLE_PAYLOAD_PROCESSING = "payload-processing";
     public static final String KEY_ENABLE_ACTIVE_SCAN = "enable-active-scan";
+    public static final String KEY_FINGERPRINT_URL_MATCH = "fingerprint-url-match";
     // 配置常量值
     public static final String DIRECT_LEFT = "left";
     public static final String DIRECT_RIGHT = "right";
@@ -94,6 +95,7 @@ public class Config {
         initDefaultConfig(Config.KEY_ENABLE_REPLACE_HEADER, "true");
         initDefaultConfig(Config.KEY_ENABLE_PAYLOAD_PROCESSING, "true");
         initDefaultConfig(Config.KEY_ENABLE_ACTIVE_SCAN, "true");
+        initDefaultConfig(Config.KEY_FINGERPRINT_URL_MATCH, "false");
         initDefaultConfig("yaml_config_path", getWorkDir() + "Config_yaml.yaml");
         // 初始化数据收集管理
         // 初始化字典管理
