@@ -107,14 +107,18 @@ public class RequestPipeline {
 
         pool.execute(() -> {
             try {
-                String requestPath = task.getReqResp() != null && task.getReqResp().request() != null
-                        ? extractRequestPath(task.getReqResp().request()) : "";
-                List<MatchResult> matches = ruleEngine.match(
-                        task.getExistingRequest(), task.getExistingResponse(), requestPath);
+                HttpRequestResponse reqResp = task.getReqResp();
+                // 从 reqResp 局部派生请求/响应字节，仅用于本次匹配，方法结束即可回收
+                byte[] reqBytes = reqResp != null && reqResp.request() != null
+                        ? reqResp.request().toByteArray().getBytes() : null;
+                byte[] respBytes = reqResp != null && reqResp.response() != null
+                        ? reqResp.response().toByteArray().getBytes() : null;
+                String requestPath = reqResp != null && reqResp.request() != null
+                        ? extractRequestPath(reqResp.request()) : "";
+                List<MatchResult> matches = ruleEngine.match(reqBytes, respBytes, requestPath);
 
                 // 无论是否匹配到指纹，都构建完整结果用于扫描记录
                 ScanResult.Builder builder = new ScanResult.Builder()
-                        .task(task)
                         .from(task.getFrom())
                         .matchResults(matches);
 
@@ -139,7 +143,9 @@ public class RequestPipeline {
 
         pool.execute(() -> {
             try {
-                byte[] respBytes = task.getExistingResponse();
+                HttpRequestResponse reqResp = task.getReqResp();
+                byte[] respBytes = reqResp != null && reqResp.response() != null
+                        ? reqResp.response().toByteArray().getBytes() : null;
                 if (respBytes == null || respBytes.length == 0) {
                     return;
                 }
@@ -198,7 +204,6 @@ public class RequestPipeline {
                 List<MatchResult> allMatches = new ArrayList<>(matches);
 
                 ScanResult.Builder builder = new ScanResult.Builder()
-                        .task(task)
                         .from(task.getFrom())
                         .matchResults(allMatches);
 
@@ -305,7 +310,6 @@ public class RequestPipeline {
         List<MatchResult> matches = ruleEngine.match(reqBytes, respBytes, reqUrl);
 
         return new ScanResult.Builder()
-                .task(task)
                 .reqResp(reqResp)
                 .from(task.getFrom())
                 .method(method)

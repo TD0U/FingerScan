@@ -1,5 +1,29 @@
 # 更新日志
 
+## 2026-07-28 (v3.0.7)
+
+### 优化
+
+- **数据看板按「主机 + 指纹」去重**
+
+  递归目录扫描会对同一主机的每一级目录都拼接规则路径发请求（去重过滤器仅按 `host + path` 去重，保证每个 URL 只发一次），当同一指纹在多个路径上被命中时（如致远-OA 的 `cloudbuild.do`/`error.do` 在 `/seeyon/`、`/seeyon/skin/` 等各级目录均返回 200），数据看板会为同一主机的同一指纹堆积几十条重复记录。
+
+  新增去重：在 `TaskTableModel.add()`（唯一入表口）按 `host|fingerprint` 收敛，同一主机的每种指纹只展示首条。无指纹的数据不参与去重，照常展示；去重键包含 scheme + host + port，因此不同协议/端口、同主机不同指纹仍各自成行。`removeItems` / `clearAll` 会同步清理去重集合，删除或清空后同「主机 + 指纹」的记录可再次入表。「扫描记录」面板不受影响，仍保留全部路径的完整请求历史，审计信息不丢失。
+
+  涉及文件：
+  - `TaskTable.java` — `TaskTableModel` 新增 `mSeenKeys` 去重集合与 `buildDedupKey()`，`add()` 入表前去重，`removeItems()` / `clearAll()` 同步清理
+
+- **去掉响应报文的重复内存引用（降低扫描后 CPU/内存占用）**
+
+  扫描结束后 CPU 仍居高不下，根因是内存中对完整请求/响应字节存在多份强引用（`ScanResult` 冗余持有整个 `ScanTask`、`ScanTask` 额外拷贝 `existingRequest`/`existingResponse` 字节），无上限累积导致老年代占满、Full GC 常驻空转。
+
+  **改动**：去除全部冗余引用，一条记录只保留单份 `reqResp`；分析所需的字节改为匹配时从 `reqResp` 局部派生、用完即回收。
+
+  涉及文件：
+  - `ScanResult.java` — 删除永不读取却永久拽住 `ScanTask` 的 `task` 字段/getter/builder 方法
+  - `ScanTask.java` — 删除 `existingRequest`/`existingResponse` 字节字段，工厂方法不再创建时拷贝整包
+  - `RequestPipeline.java` — `submitAnalysis`/`submitIconHashAnalysis` 分析时从 `reqResp` 局部派生字节，移除 4 处 `.task(task)`
+
 ## 2026-07-16 (v3.0.6)
 
 ### 优化

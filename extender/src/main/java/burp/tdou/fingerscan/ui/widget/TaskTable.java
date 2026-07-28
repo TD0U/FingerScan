@@ -26,6 +26,7 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.List;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -775,6 +776,12 @@ public class TaskTable extends JTable implements ActionListener {
         private final List<TaskData> mData;
         private final AtomicInteger mCounter;
         private final DataTableItemLoader<TaskData> mItemLoader;
+        /**
+         * 已展示的「主机 + 指纹」去重集合。
+         * 递归扫描下同一主机的多个路径会命中同一指纹，此处按 host|fingerprint 收敛，
+         * 每种指纹在同一主机下只展示首条。完整路径仍保留在「扫描记录」中，不影响审计。
+         */
+        private final Set<String> mSeenKeys = ConcurrentHashMap.newKeySet();
 
         public TaskTableModel() {
             mData = Collections.synchronizedList(new ArrayList<>());
@@ -782,8 +789,28 @@ public class TaskTable extends JTable implements ActionListener {
             mItemLoader = new DataTableItemLoader<>(this, 500);
         }
 
+        /**
+         * 计算「主机 + 指纹」去重键。无指纹的数据返回 null（不参与去重，全部展示）。
+         */
+        private String buildDedupKey(TaskData data) {
+            if (data == null) {
+                return null;
+            }
+            String fingerprint = data.getFingerprint();
+            if (StringUtils.isEmpty(fingerprint)) {
+                return null;
+            }
+            String host = data.getHost() != null ? data.getHost() : "";
+            return host + "|" + fingerprint;
+        }
+
         public void add(TaskData data) {
             if (data == null || data.getReqResp() == null) {
+                return;
+            }
+            // 「主机 + 指纹」去重：同一主机的同一指纹只展示首条
+            String dedupKey = buildDedupKey(data);
+            if (dedupKey != null && !mSeenKeys.add(dedupKey)) {
                 return;
             }
             int id = mCounter.getAndIncrement();
@@ -813,11 +840,19 @@ public class TaskTable extends JTable implements ActionListener {
                 return;
             }
             mData.removeAll(list);
+            // 同步移除去重键，删除后同「主机+指纹」的记录可再次入表
+            for (TaskData data : list) {
+                String dedupKey = buildDedupKey(data);
+                if (dedupKey != null) {
+                    mSeenKeys.remove(dedupKey);
+                }
+            }
             fireTableDataChanged();
         }
 
         public synchronized void clearAll() {
             mData.clear();
+            mSeenKeys.clear();
             fireTableDataChanged();
         }
 

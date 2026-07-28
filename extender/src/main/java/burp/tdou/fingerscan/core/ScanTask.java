@@ -22,8 +22,6 @@ public class ScanTask {
     private final TaskType type;
     private final HttpService service;
     private final byte[] requestBytes;
-    private final byte[] existingRequest;
-    private final byte[] existingResponse;
     private final HttpRequestResponse reqResp;
 
     private ScanTask(Builder builder) {
@@ -32,8 +30,6 @@ public class ScanTask {
         this.type = builder.type;
         this.service = builder.service;
         this.requestBytes = builder.requestBytes;
-        this.existingRequest = builder.existingRequest;
-        this.existingResponse = builder.existingResponse;
         this.reqResp = builder.reqResp;
     }
 
@@ -42,8 +38,6 @@ public class ScanTask {
     public TaskType getType() { return type; }
     public HttpService getService() { return service; }
     public byte[] getRequestBytes() { return requestBytes; }
-    public byte[] getExistingRequest() { return existingRequest; }
-    public byte[] getExistingResponse() { return existingResponse; }
     public HttpRequestResponse getReqResp() { return reqResp; }
     public String getHost() { return service != null ? service.host() : ""; }
 
@@ -73,14 +67,8 @@ public class ScanTask {
      */
     public static ScanTask passiveMatch(HttpRequestResponse reqResp, HttpService service,
                                         String dedupKey, String from) {
-        byte[] request = reqResp != null && reqResp.request() != null
-                ? reqResp.request().toByteArray().getBytes() : null;
-        byte[] response = reqResp != null && reqResp.response() != null
-                ? reqResp.response().toByteArray().getBytes() : null;
         return new Builder()
                 .type(TaskType.PASSIVE_MATCH)
-                .existingRequest(request)
-                .existingResponse(response)
                 .reqResp(reqResp)
                 .service(service)
                 .deduplicationKey(dedupKey)
@@ -93,14 +81,8 @@ public class ScanTask {
      */
     public static ScanTask iconHash(HttpRequestResponse reqResp, HttpService service,
                                     String dedupKey, String from) {
-        byte[] request = reqResp != null && reqResp.request() != null
-                ? reqResp.request().toByteArray().getBytes() : null;
-        byte[] response = reqResp != null && reqResp.response() != null
-                ? reqResp.response().toByteArray().getBytes() : null;
         return new Builder()
                 .type(TaskType.ICON_HASH)
-                .existingRequest(request)
-                .existingResponse(response)
                 .reqResp(reqResp)
                 .service(service)
                 .deduplicationKey(dedupKey)
@@ -114,8 +96,6 @@ public class ScanTask {
         private TaskType type = TaskType.HTTP_REQUEST;
         private HttpService service;
         private byte[] requestBytes;
-        private byte[] existingRequest;
-        private byte[] existingResponse;
         private HttpRequestResponse reqResp;
 
         public Builder deduplicationKey(String key) { this.deduplicationKey = key; return this; }
@@ -123,8 +103,6 @@ public class ScanTask {
         public Builder type(TaskType type) { this.type = type; return this; }
         public Builder service(HttpService service) { this.service = service; return this; }
         public Builder requestBytes(byte[] bytes) { this.requestBytes = bytes; return this; }
-        public Builder existingRequest(byte[] req) { this.existingRequest = req; return this; }
-        public Builder existingResponse(byte[] resp) { this.existingResponse = resp; return this; }
         public Builder reqResp(HttpRequestResponse rr) { this.reqResp = rr; return this; }
 
         public ScanTask build() { return new ScanTask(this); }

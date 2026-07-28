@@ -13,7 +13,6 @@ import java.util.List;
  */
 public class ScanResult {
 
-    private final ScanTask task;
     private final HttpRequestResponse reqResp;
     private final String from;
     private final String method;
@@ -28,7 +27,6 @@ public class ScanResult {
     private final boolean timeout;
 
     private ScanResult(Builder builder) {
-        this.task = builder.task;
         this.reqResp = builder.reqResp;
         this.from = builder.from;
         this.method = builder.method;
@@ -45,7 +43,6 @@ public class ScanResult {
         this.timeout = builder.timeout;
     }
 
-    public ScanTask getTask() { return task; }
     public HttpRequestResponse getReqResp() { return reqResp; }
     public String getFrom() { return from; }
     public String getMethod() { return method; }
@@ -78,7 +75,6 @@ public class ScanResult {
      */
     public static ScanResult timeout(ScanTask task) {
         return new Builder()
-                .task(task)
                 .from(task.getFrom())
                 .status(-1)
                 .length(-1)
@@ -87,7 +83,6 @@ public class ScanResult {
     }
 
     public static class Builder {
-        private ScanTask task;
         private HttpRequestResponse reqResp;
         private String from;
         private String method;
@@ -100,7 +95,6 @@ public class ScanResult {
         private List<MatchResult> matchResults;
         private boolean timeout;
 
-        public Builder task(ScanTask task) { this.task = task; return this; }
         public Builder reqResp(HttpRequestResponse rr) { this.reqResp = rr; return this; }
         public Builder from(String from) { this.from = from; return this; }
         public Builder method(String method) { this.method = method; return this; }
