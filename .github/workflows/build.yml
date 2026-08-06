@@ -1,11 +1,10 @@
 name: Build FingerScan
 
+# 仅在创建 Release（推送 v* tag）时自动构建并发布；
+# 日常 push/PR 不触发，避免无意义排队。
 on:
   push:
-    branches: [ main, master ]
     tags: [ 'v*' ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -30,6 +29,7 @@ jobs:
 
   release:
     needs: build
+    # tag 推送时自动建 Release；手动 workflow_dispatch 仅构建、不发版
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
