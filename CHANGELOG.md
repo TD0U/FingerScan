@@ -1,5 +1,20 @@
 # 更新日志
 
+## 2026-08-07 (v3.0.8)
+
+### Bug 修复
+
+- **HTML 声明的站点图标（如 `/datalook.ico`）未写入「图标数据」**
+
+  原先 Icon Hash 为纯被动：HTML 解析到 `<link rel="icon">` 后只把路径写入 `FaviconRegistry`，等待浏览器再次请求该图标；`.ico` 在默认排除后缀中，仅已注册路径或 `/favicon.ico` 可放行。浏览器常与页面并行请求 favicon，图标请求若早于 HTML 处理到达，会被 `SuffixFilter` 直接丢弃，之后也不会补拉，导致「图标数据」缺失。
+
+  **修复**：解析到站点图标后，对**同 host** 的声明路径主动发一次 GET（走现有 requestPool / QPS / 去重），响应进入 Icon Hash 分析并写入 SQLite。跨域链接只注册不发包；不开放全部 `*.ico`，避免业务图标误入。
+
+  涉及文件：
+  - `IconHashStrategy.java` — HTML 时生成主动拉取任务（`from=IconHash`）
+  - `RequestPipeline.java` — `from=IconHash` 的 HTTP 响应走 Icon Hash 分析入库，不跑普通指纹规则
+  - `ScanRequest.java` — 新增 `FROM_ICON_HASH`
+
 ## 2026-07-28 (v3.0.7)
 
 ### 优化

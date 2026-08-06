@@ -16,6 +16,8 @@ public class ScanRequest {
     public static final String FROM_IMPORT = "Import";
     public static final String FROM_SCAN = "Scan";
     public static final String FROM_REDIRECT = "Redirect";
+    /** 主动拉取 favicon（IconHash 策略声明后发起） */
+    public static final String FROM_ICON_HASH = "IconHash";
 
     private final HttpRequestResponse httpReqResp;
     private final String from;

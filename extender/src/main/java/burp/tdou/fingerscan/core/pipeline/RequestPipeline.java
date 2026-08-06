@@ -10,6 +10,7 @@ import burp.tdou.common.utils.HtmlUtils;
 import burp.tdou.common.utils.IPUtils;
 import burp.tdou.common.utils.Utils;
 import burp.tdou.fingerscan.common.Config;
+import burp.tdou.fingerscan.core.ScanRequest;
 import burp.tdou.fingerscan.core.ScanResult;
 import burp.tdou.fingerscan.core.ScanTask;
 import burp.tdou.fingerscan.core.rule.MatchResult;
@@ -132,7 +133,7 @@ public class RequestPipeline {
     }
 
     /**
-     * Icon Hash 分析任务：计算 favicon hash 并匹配指纹 + 存储到 SQLite
+     * Icon Hash 分析任务：提交到分析池
      */
     private void submitIconHashAnalysis(ScanTask task) {
         ExecutorService pool = analysisPool;
@@ -140,80 +141,90 @@ public class RequestPipeline {
             dedup.remove(task.getDeduplicationKey());
             return;
         }
+        pool.execute(() -> analyzeIconHash(task));
+    }
 
-        pool.execute(() -> {
-            try {
-                HttpRequestResponse reqResp = task.getReqResp();
-                byte[] respBytes = reqResp != null && reqResp.response() != null
-                        ? reqResp.response().toByteArray().getBytes() : null;
-                if (respBytes == null || respBytes.length == 0) {
-                    return;
-                }
-
-                // Parse response to extract body - use raw byte parsing instead of helpers
-                String respStr = new String(respBytes);
-
-                // Skip non-2xx responses (e.g. 404 error pages)
-                int firstLineEnd = respStr.indexOf("\r\n");
-                if (firstLineEnd > 0) {
-                    int statusCode = parseStatusCode(respStr.substring(0, firstLineEnd));
-                    if (statusCode < 200 || statusCode >= 300) {
-                        return;
-                    }
-                }
-
-                int bodyOffset = respStr.indexOf("\r\n\r\n");
-                if (bodyOffset < 0) {
-                    return;
-                }
-                bodyOffset += 4;
-                if (bodyOffset >= respBytes.length) {
-                    return;
-                }
-                byte[] body = new byte[respBytes.length - bodyOffset];
-                System.arraycopy(respBytes, bodyOffset, body, 0, body.length);
-
-                List<MatchResult> matches = iconHashMatcher.match(body);
-
-                // Extract content-type from headers
-                String contentType = "";
-                String headerSection = respStr.substring(0, bodyOffset - 4);
-                String[] headerLines = headerSection.split("\r\n");
-                for (String header : headerLines) {
-                    if (header.toLowerCase().startsWith("content-type:")) {
-                        contentType = header.substring(13).trim();
-                        break;
-                    }
-                }
-
-                String murmurHash = iconHashMatcher.computeMurmurHash(body);
-                String md5 = iconHashMatcher.computeMd5(body);
-                String matchName = matches.isEmpty() ? null :
-                        matches.stream().map(MatchResult::getRuleName)
-                               .collect(Collectors.joining(", "));
-
-                HttpService service = task.getService();
-                String host = service != null ? service.host() : "";
-                String path = "";
-                if (task.getReqResp() != null && task.getReqResp().request() != null) {
-                    path = extractRequestPath(task.getReqResp().request());
-                }
-
-                iconHashStore.saveIcon(murmurHash, md5, body, contentType, matchName, host, path);
-
-                List<MatchResult> allMatches = new ArrayList<>(matches);
-
-                ScanResult.Builder builder = new ScanResult.Builder()
-                        .from(task.getFrom())
-                        .matchResults(allMatches);
-
-                fillResultFromReqResp(builder, task);
-                dispatcher.dispatch(builder.build());
-                analysisCount.incrementAndGet();
-            } catch (Exception e) {
-                Logger.error("IconHash analysis error: %s", e.getMessage());
+    /**
+     * 计算 favicon hash、匹配指纹、写入 SQLite 并分发结果。
+     * 供被动 IconHash 任务与主动拉取 favicon 后共用。
+     */
+    private void analyzeIconHash(ScanTask task) {
+        try {
+            HttpRequestResponse reqResp = task.getReqResp();
+            byte[] respBytes = reqResp != null && reqResp.response() != null
+                    ? reqResp.response().toByteArray().getBytes() : null;
+            if (respBytes == null || respBytes.length == 0) {
+                return;
             }
-        });
+
+            // Parse response to extract body - use raw byte parsing instead of helpers
+            String respStr = new String(respBytes);
+
+            // Skip non-2xx responses (e.g. 404 error pages)
+            int firstLineEnd = respStr.indexOf("\r\n");
+            if (firstLineEnd > 0) {
+                int statusCode = parseStatusCode(respStr.substring(0, firstLineEnd));
+                if (statusCode < 200 || statusCode >= 300) {
+                    return;
+                }
+            }
+
+            int bodyOffset = respStr.indexOf("\r\n\r\n");
+            if (bodyOffset < 0) {
+                return;
+            }
+            bodyOffset += 4;
+            if (bodyOffset >= respBytes.length) {
+                return;
+            }
+            byte[] body = new byte[respBytes.length - bodyOffset];
+            System.arraycopy(respBytes, bodyOffset, body, 0, body.length);
+
+            // 空 body 不入库
+            if (body.length == 0) {
+                return;
+            }
+
+            List<MatchResult> matches = iconHashMatcher.match(body);
+
+            // Extract content-type from headers
+            String contentType = "";
+            String headerSection = respStr.substring(0, bodyOffset - 4);
+            String[] headerLines = headerSection.split("\r\n");
+            for (String header : headerLines) {
+                if (header.toLowerCase().startsWith("content-type:")) {
+                    contentType = header.substring(13).trim();
+                    break;
+                }
+            }
+
+            String murmurHash = iconHashMatcher.computeMurmurHash(body);
+            String md5 = iconHashMatcher.computeMd5(body);
+            String matchName = matches.isEmpty() ? null :
+                    matches.stream().map(MatchResult::getRuleName)
+                           .collect(Collectors.joining(", "));
+
+            HttpService service = task.getService();
+            String host = service != null ? service.host() : "";
+            String path = "";
+            if (task.getReqResp() != null && task.getReqResp().request() != null) {
+                path = extractRequestPath(task.getReqResp().request());
+            }
+
+            iconHashStore.saveIcon(murmurHash, md5, body, contentType, matchName, host, path);
+
+            List<MatchResult> allMatches = new ArrayList<>(matches);
+
+            ScanResult.Builder builder = new ScanResult.Builder()
+                    .from(task.getFrom())
+                    .matchResults(allMatches);
+
+            fillResultFromReqResp(builder, task);
+            dispatcher.dispatch(builder.build());
+            analysisCount.incrementAndGet();
+        } catch (Exception e) {
+            Logger.error("IconHash analysis error: %s", e.getMessage());
+        }
     }
 
     /**
@@ -270,6 +281,15 @@ public class RequestPipeline {
                     service, task.getRequestBytes(), retryCount, retryInterval, reqHost);
         } catch (InterruptedException e) {
             dedup.remove(task.getDeduplicationKey());
+            return;
+        }
+
+        // 主动拉取的 favicon：走 Icon Hash 分析入库（不跑普通指纹规则，避免二进制误匹配）
+        if (ScanRequest.FROM_ICON_HASH.equals(task.getFrom())) {
+            ScanTask iconTask = ScanTask.iconHash(
+                    reqResp, service, task.getDeduplicationKey(), task.getFrom());
+            // 直接投分析池（不再走 submit 的 dedup，键已在 HTTP 任务提交时占用）
+            submitIconHashAnalysis(iconTask);
             return;
         }
 
