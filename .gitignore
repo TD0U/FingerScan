@@ -31,3 +31,6 @@ build/
 .idea
 target
 .claude
+# Superpowers internal plans/specs
+docs/superpowers/
+.superpowers/
