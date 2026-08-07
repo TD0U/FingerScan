@@ -88,6 +88,9 @@ public final class RuleIndex {
         String state = str(rule.get("state"));
         String url = str(rule.get("url"));
 
+        // (?=.*a)(?=.*b) → contains AND，彻底避开 find 回溯
+        List<String> lookaheadAnd = LookaheadAndOptimizer.tryExtractAndLiterals(regex);
+
         LiteralExtractor.ExtractResult er = LiteralExtractor.extract(regex, minLiteralLen);
         boolean disabled = er.disabled;
         List<String> must = er.must;
@@ -101,7 +104,7 @@ public final class RuleIndex {
         }
 
         return new CompiledRule(name, regex, pattern, state, url,
-                disabled, mustFolded, orFolded);
+                disabled, mustFolded, orFolded, lookaheadAnd);
     }
 
     private static List<String> foldList(List<String> in) {

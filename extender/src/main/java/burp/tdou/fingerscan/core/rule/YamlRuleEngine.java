@@ -114,10 +114,8 @@ public class YamlRuleEngine implements RuleEngine {
             timeoutMs = 0;
         }
 
-        String textFolded = null;
-        if (prefilterOn) {
-            textFolded = responseStr.toLowerCase(Locale.ROOT);
-        }
+        // 预过滤 + lookahead-AND 优化都需要 folded 文本
+        String textFolded = responseStr.toLowerCase(Locale.ROOT);
 
         List<MatchResult> results = new ArrayList<>();
         for (CompiledRule rule : snap.rules) {
@@ -126,6 +124,14 @@ public class YamlRuleEngine implements RuleEngine {
                     continue;
                 }
                 if (!matchPath(requestPath, rule.getUrl())) {
+                    continue;
+                }
+                // (?=.*a)(?=.*b) → 纯 contains AND，不进 Pattern.find
+                if (rule.isLookaheadAndOptimized()) {
+                    if (LookaheadAndOptimizer.matchesAllLiterals(
+                            textFolded, rule.getLookaheadAndLiterals())) {
+                        results.add(MatchResult.fromYamlRule(rule.getName(), rule.getRegex()));
+                    }
                     continue;
                 }
                 if (prefilterOn && !rule.isPrefilterDisabled()) {
@@ -149,6 +155,11 @@ public class YamlRuleEngine implements RuleEngine {
      * @return true 若 find 命中；超时抛 {@link MatchTimeoutException}
      */
     boolean findWithTimeout(CompiledRule rule, String responseStr, long timeoutMs) {
+        if (rule.isLookaheadAndOptimized()) {
+            String folded = responseStr.toLowerCase(Locale.ROOT);
+            return LookaheadAndOptimizer.matchesAllLiterals(
+                    folded, rule.getLookaheadAndLiterals());
+        }
         if (timeoutMs <= 0) {
             Matcher matcher = rule.getPattern().matcher(responseStr);
             return matcher.find();

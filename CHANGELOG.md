@@ -18,6 +18,15 @@
   - `TimeoutCharSequence` / `MatchTimeoutException` / `YamlRuleEngine`
   - `Config`、`OtherTab`、i18n
 
+- **双前瞻 `(?=.*a)(?=.*b)` 改为 contains AND（根治 Doc File 类超时）**
+
+  超时日志显示规则「Doc File」等写法 `(?=.*swagger)(?=.*webjars)` 在大 HTML 上持续触发 `CharPropertyGreedy` 回溯，即使 100ms 超时仍会每响应烧 CPU。
+
+  **改动：** 编译期识别「整串仅为多个 `(?=.*字面量)` / `(?=.*?字面量)`」的规则，匹配时改为忽略大小写的多次 `contains`（AND），**不再**对该规则调用 `Pattern.find`。无法安全解析的仍走原正则 + 超时。
+
+  涉及文件：
+  - `LookaheadAndOptimizer` / `CompiledRule` / `RuleIndex` / `YamlRuleEngine`
+
 ## 2026-08-07 (v3.0.9)
 
 ### 优化
