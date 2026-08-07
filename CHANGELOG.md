@@ -1,5 +1,23 @@
 # 更新日志
 
+## 2026-08-08 (v3.0.11)
+
+### 新功能
+
+- **指纹规则支持「字符串匹配」模式**
+
+  原先所有指纹的 `re` 均按 Java 正则执行，Doc File 等「多关键字同时出现」场景常被写成 `(?=.*a)(?=.*b)`，易触发灾难性回溯。
+
+  **改动：**
+  - YAML 可选字段 `match`：`regex`（默认，兼容旧规则）或 `keyword`（字符串）
+  - `keyword` 时 `re` 为关键字表达式：单关键字、`a && b`（AND）、`a || b`（OR）；禁止混用；忽略大小写 `contains`
+  - 指纹管理对话框增加「匹配方式」；列表增加「方式」列；测试对话框支持关键字高亮
+  - 引擎对 keyword 不走 `Pattern.find`
+
+  涉及文件：
+  - `KeywordSpec` / `CompiledRule` / `RuleIndex` / `YamlRuleEngine`
+  - `FingerprintRuleDialog` / `FingerprintPanel` / `TestRuleDialog`
+
 ## 2026-08-07 (v3.0.10)
 
 ### 优化

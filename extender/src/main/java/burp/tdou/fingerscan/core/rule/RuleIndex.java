@@ -78,6 +78,20 @@ public final class RuleIndex {
         if (name == null || name.isEmpty() || regex == null || regex.isEmpty()) {
             return null;
         }
+        String state = str(rule.get("state"));
+        String url = str(rule.get("url"));
+
+        // 字符串匹配：match=keyword（缺省/其它值均为 regex，兼容旧配置）
+        String matchField = str(rule.get("match"));
+        if (matchField != null && "keyword".equalsIgnoreCase(matchField.trim())) {
+            KeywordSpec ks = KeywordSpec.parse(regex);
+            if (ks == null) {
+                Logger.debug("RuleIndex: invalid keyword rule %s, skip", name);
+                return null;
+            }
+            return CompiledRule.keyword(name, regex, state, url, ks);
+        }
+
         Pattern pattern;
         try {
             pattern = Pattern.compile(regex, PATTERN_FLAGS);
@@ -85,8 +99,6 @@ public final class RuleIndex {
             Logger.debug("RuleIndex: invalid regex for %s: %s", name, e.getMessage());
             return null;
         }
-        String state = str(rule.get("state"));
-        String url = str(rule.get("url"));
 
         // (?=.*a)(?=.*b) → contains AND，彻底避开 find 回溯
         List<String> lookaheadAnd = LookaheadAndOptimizer.tryExtractAndLiterals(regex);

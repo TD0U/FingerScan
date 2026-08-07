@@ -126,6 +126,13 @@ public class YamlRuleEngine implements RuleEngine {
                 if (!matchPath(requestPath, rule.getUrl())) {
                     continue;
                 }
+                // 字符串匹配规则：contains AND/OR，不进 Pattern.find
+                if (rule.isKeyword()) {
+                    if (rule.getKeywordSpec().matches(textFolded)) {
+                        results.add(MatchResult.fromYamlRule(rule.getName(), rule.getRegex()));
+                    }
+                    continue;
+                }
                 // (?=.*a)(?=.*b) → 纯 contains AND，不进 Pattern.find
                 if (rule.isLookaheadAndOptimized()) {
                     if (LookaheadAndOptimizer.matchesAllLiterals(
@@ -155,6 +162,10 @@ public class YamlRuleEngine implements RuleEngine {
      * @return true 若 find 命中；超时抛 {@link MatchTimeoutException}
      */
     boolean findWithTimeout(CompiledRule rule, String responseStr, long timeoutMs) {
+        if (rule.isKeyword()) {
+            String folded = responseStr.toLowerCase(Locale.ROOT);
+            return rule.getKeywordSpec().matches(folded);
+        }
         if (rule.isLookaheadAndOptimized()) {
             String folded = responseStr.toLowerCase(Locale.ROOT);
             return LookaheadAndOptimizer.matchesAllLiterals(

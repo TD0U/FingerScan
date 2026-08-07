@@ -56,7 +56,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
     
     // 表格列名
     private static final String[] COLUMN_NAMES = {
-        "ID", "名称", "启用", "方法", "URL路径", "正则表达式", "类型", "状态码", "描述"
+        "ID", "名称", "启用", "方法", "URL路径", "方式", "匹配内容", "类型", "状态码", "描述"
     };
 
     private static final String[] ICON_HASH_COLUMN_NAMES = {
@@ -267,7 +267,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
      * 设置表格列宽
      */
     private void setColumnWidths() {
-        int[] columnWidths = {50, 150, 60, 80, 200, 250, 80, 80, 200};
+        int[] columnWidths = {50, 150, 60, 80, 180, 60, 220, 80, 80, 180};
         for (int i = 0; i < columnWidths.length && i < fingerprintTable.getColumnCount(); i++) {
             fingerprintTable.getColumnModel().getColumn(i).setPreferredWidth(columnWidths[i]);
         }
@@ -289,10 +289,12 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
             rowData[2] = rule.get("loaded");
             rowData[3] = str(rule.get("method"));
             rowData[4] = str(rule.get("url"));
-            rowData[5] = str(rule.get("re"));
-            rowData[6] = str(rule.get("type"));
-            rowData[7] = str(rule.get("state"));
-            rowData[8] = rule.get("info");
+            String match = str(rule.get("match"));
+            rowData[5] = "keyword".equalsIgnoreCase(match) ? "字符串" : "正则";
+            rowData[6] = str(rule.get("re"));
+            rowData[7] = str(rule.get("type"));
+            rowData[8] = str(rule.get("state"));
+            rowData[9] = rule.get("info");
 
             tableModel.addRow(rowData);
         }
@@ -312,7 +314,7 @@ public class FingerprintPanel extends JPanel implements ActionListener, KeyListe
         Map<String, Integer> typeCounts = new LinkedHashMap<>();
         int total = tableModel.getRowCount();
         for (int i = 0; i < total; i++) {
-            String type = str(tableModel.getValueAt(i, 6));
+            String type = str(tableModel.getValueAt(i, 7));
             if (type.isEmpty()) type = "未分类";
             typeCounts.merge(type, 1, Integer::sum);
         }

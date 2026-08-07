@@ -29,15 +29,20 @@ public class FingerprintRuleDialog extends JDialog implements ActionListener {
     private JCheckBox enabledCheckBox;
     private JComboBox<String> methodComboBox;
     private JTextField urlField;
+    private JComboBox<String> matchModeComboBox;
+    private JLabel contentLabel;
     private JTextArea regexArea;
+    private TitledBorder contentBorder;
     private JComboBox<String> typeComboBox;
     private JComboBox<String> stateComboBox;
     private JTextArea infoArea;
-    
+    private JButton testButton;
+
     // 预定义选项
     private static final String[] HTTP_METHODS = {"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"};
     private static final String[] RULE_TYPES = {"web", "api", "admin", "backup", "config", "debug", "other"};
     private static final String[] RULE_STATES = {"0", "200"};
+    private static final String[] MATCH_MODES = {"正则", "字符串"};
     
     /**
      * 构造函数
@@ -141,20 +146,37 @@ public class FingerprintRuleDialog extends JDialog implements ActionListener {
         
         row++;
         
-        // 正则表达式
+        // 匹配方式
+        gbc.gridx = 0; gbc.gridy = row; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0; gbc.anchor = GridBagConstraints.WEST;
+        panel.add(new JLabel("匹配方式:*"), gbc);
+        gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0;
+        matchModeComboBox = new JComboBox<>(MATCH_MODES);
+        matchModeComboBox.setSelectedIndex(0);
+        matchModeComboBox.addItemListener(e -> {
+            if (e.getStateChange() == java.awt.event.ItemEvent.SELECTED) {
+                updateContentLabels();
+            }
+        });
+        panel.add(matchModeComboBox, gbc);
+
+        row++;
+
+        // 匹配内容（正则或关键字）
         gbc.gridx = 0; gbc.gridy = row; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0; gbc.anchor = GridBagConstraints.NORTHWEST;
-        panel.add(new JLabel("正则表达式:*"), gbc);
+        contentLabel = new JLabel("正则表达式:*");
+        panel.add(contentLabel, gbc);
         gbc.gridx = 1; gbc.fill = GridBagConstraints.BOTH; gbc.weightx = 1.0; gbc.weighty = 0.3;
         regexArea = new JTextArea(4, 30);
         regexArea.setLineWrap(true);
         regexArea.setWrapStyleWord(true);
-        regexArea.setToolTipText("用于匹配响应内容的正则表达式");
+        contentBorder = new TitledBorder("正则表达式");
         JScrollPane regexScrollPane = new JScrollPane(regexArea);
-        regexScrollPane.setBorder(new TitledBorder("正则表达式"));
+        regexScrollPane.setBorder(contentBorder);
         panel.add(regexScrollPane, gbc);
-        
+        updateContentLabels();
+
         row++;
-        
+
         // 类型
         gbc.gridx = 0; gbc.gridy = row; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0; gbc.weighty = 0; gbc.anchor = GridBagConstraints.WEST;
         panel.add(new JLabel("类型:"), gbc);
@@ -197,7 +219,7 @@ public class FingerprintRuleDialog extends JDialog implements ActionListener {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         panel.setBorder(new EmptyBorder(10, 0, 0, 0));
         
-        JButton testButton = new JButton("测试正则");
+        testButton = new JButton("测试匹配");
         testButton.setActionCommand("test-regex");
         testButton.addActionListener(this);
         panel.add(testButton);
@@ -230,7 +252,16 @@ public class FingerprintRuleDialog extends JDialog implements ActionListener {
         
         urlField.setText(rule.get("url") != null ? rule.get("url").toString() : "");
         regexArea.setText(rule.get("re") != null ? rule.get("re").toString() : "");
-        
+
+        Object matchObj = rule.get("match");
+        String match = matchObj != null ? matchObj.toString().trim() : "regex";
+        if ("keyword".equalsIgnoreCase(match)) {
+            matchModeComboBox.setSelectedItem("字符串");
+        } else {
+            matchModeComboBox.setSelectedItem("正则");
+        }
+        updateContentLabels();
+
         String type = rule.get("type") != null ? rule.get("type").toString() : "web";
         typeComboBox.setSelectedItem(type);
         
@@ -264,21 +295,29 @@ public class FingerprintRuleDialog extends JDialog implements ActionListener {
             return false;
         }
         
-        if (regexArea.getText().trim().isEmpty()) {
-            showError("请输入正则表达式！");
+        String content = regexArea.getText().trim();
+        if (content.isEmpty()) {
+            showError(isKeywordMode() ? "请输入关键字！" : "请输入正则表达式！");
             regexArea.requestFocus();
             return false;
         }
-        
-        // 验证正则表达式
-        try {
-            Pattern.compile(regexArea.getText().trim());
-        } catch (Exception e) {
-            showError("正则表达式格式错误：" + e.getMessage());
-            regexArea.requestFocus();
-            return false;
+
+        if (isKeywordMode()) {
+            if (burp.tdou.fingerscan.core.rule.KeywordSpec.parse(content) == null) {
+                showError("关键字格式无效（检查 && / || 是否混用或存在空段）");
+                regexArea.requestFocus();
+                return false;
+            }
+        } else {
+            try {
+                Pattern.compile(content);
+            } catch (Exception e) {
+                showError("正则表达式格式错误：" + e.getMessage());
+                regexArea.requestFocus();
+                return false;
+            }
         }
-        
+
         // 验证URL路径格式
         String url = urlField.getText().trim();
         if (!url.startsWith("/")) {
@@ -286,8 +325,38 @@ public class FingerprintRuleDialog extends JDialog implements ActionListener {
             urlField.requestFocus();
             return false;
         }
-        
+
         return true;
+    }
+
+    private boolean isKeywordMode() {
+        return matchModeComboBox != null
+                && "字符串".equals(String.valueOf(matchModeComboBox.getSelectedItem()));
+    }
+
+    private void updateContentLabels() {
+        if (contentLabel == null || contentBorder == null || regexArea == null) {
+            return;
+        }
+        if (isKeywordMode()) {
+            contentLabel.setText("关键字:*");
+            contentBorder.setTitle("关键字");
+            regexArea.setToolTipText("单关键字；AND 用 && 连接；OR 用 || 连接；不可混用。例如: swagger && webjars");
+            if (testButton != null) {
+                testButton.setText("测试匹配");
+            }
+        } else {
+            contentLabel.setText("正则表达式:*");
+            contentBorder.setTitle("正则表达式");
+            regexArea.setToolTipText("用于匹配响应内容的正则表达式");
+            if (testButton != null) {
+                testButton.setText("测试匹配");
+            }
+        }
+        // 刷新 border 标题绘制
+        if (regexArea.getParent() != null && regexArea.getParent().getParent() != null) {
+            regexArea.getParent().getParent().repaint();
+        }
     }
     
     /**
@@ -313,10 +382,11 @@ public class FingerprintRuleDialog extends JDialog implements ActionListener {
         rule.put("method", methodComboBox.getSelectedItem().toString().trim());
         rule.put("url", urlField.getText().trim());
         rule.put("re", regexArea.getText().trim());
+        rule.put("match", isKeywordMode() ? "keyword" : "regex");
         rule.put("type", typeComboBox.getSelectedItem().toString().trim());
         rule.put("state", stateComboBox.getSelectedItem().toString().trim());
         rule.put("info", infoArea.getText().trim());
-        
+
         return rule;
     }
     

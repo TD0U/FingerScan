@@ -1,11 +1,14 @@
 package burp.tdou.fingerscan.ui.widget;
 
+import burp.tdou.fingerscan.core.rule.KeywordSpec;
+
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.text.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -158,50 +161,98 @@ public class TestRuleDialog extends JDialog implements ActionListener {
             return;
         }
 
-        String regex = str(rule.get("re"));
-        if (regex.isEmpty()) {
+        String patternText = str(rule.get("re"));
+        if (patternText.isEmpty()) {
             resultLabel.setForeground(FAIL_COLOR);
-            resultLabel.setText("规则正则表达式为空");
+            resultLabel.setText("规则匹配内容为空");
             return;
         }
 
-        try {
-            Pattern pattern = Pattern.compile(regex, Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-            Matcher matcher = pattern.matcher(content);
+        String matchMode = str(rule.get("match"));
+        boolean keyword = "keyword".equalsIgnoreCase(matchMode);
 
+        try {
             StyledDocument doc = responseArea.getStyledDocument();
             Style defaultStyle = StyleContext.getDefaultStyleContext()
                     .getStyle(StyleContext.DEFAULT_STYLE);
             doc.setCharacterAttributes(0, doc.getLength(), defaultStyle, true);
 
-            int matchCount = 0;
             Style highlightStyle = doc.addStyle("highlight", null);
             StyleConstants.setBackground(highlightStyle, MATCH_COLOR);
             StyleConstants.setBold(highlightStyle, true);
 
-            while (matcher.find()) {
-                matchCount++;
-                int start = matcher.start();
-                int end = matcher.end();
-                doc.setCharacterAttributes(start, end - start, highlightStyle, false);
-            }
-
-            if (matchCount > 0) {
-                resultLabel.setForeground(SUCCESS_COLOR);
-                resultLabel.setText("匹配成功! 找到 " + matchCount + " 处匹配");
-
-                Matcher first = pattern.matcher(content);
-                if (first.find()) {
-                    responseArea.setCaretPosition(first.start());
-                }
+            if (keyword) {
+                performKeywordTest(content, patternText, doc, highlightStyle);
             } else {
-                resultLabel.setForeground(FAIL_COLOR);
-                resultLabel.setText("匹配失败 - 响应内容中未找到匹配项");
+                performRegexTest(content, patternText, doc, highlightStyle);
             }
-
         } catch (Exception ex) {
             resultLabel.setForeground(FAIL_COLOR);
-            resultLabel.setText("正则表达式错误: " + ex.getMessage());
+            resultLabel.setText("测试错误: " + ex.getMessage());
+        }
+    }
+
+    private void performKeywordTest(String content, String raw, StyledDocument doc, Style highlightStyle) {
+        KeywordSpec ks = KeywordSpec.parse(raw);
+        if (ks == null) {
+            resultLabel.setForeground(FAIL_COLOR);
+            resultLabel.setText("关键字格式无效（检查 && / || 是否混用或空段）");
+            return;
+        }
+        String folded = content.toLowerCase(Locale.ROOT);
+        boolean ok = ks.matches(folded);
+        int matchCount = 0;
+        int firstPos = -1;
+        for (String lit : ks.literals) {
+            if (lit == null || lit.isEmpty()) {
+                continue;
+            }
+            int from = 0;
+            while (from <= folded.length() - lit.length()) {
+                int idx = folded.indexOf(lit, from);
+                if (idx < 0) {
+                    break;
+                }
+                matchCount++;
+                if (firstPos < 0) {
+                    firstPos = idx;
+                }
+                doc.setCharacterAttributes(idx, lit.length(), highlightStyle, false);
+                from = idx + Math.max(1, lit.length());
+            }
+        }
+        if (ok && matchCount > 0) {
+            resultLabel.setForeground(SUCCESS_COLOR);
+            resultLabel.setText("匹配成功! 找到 " + matchCount + " 处关键字命中（"
+                    + ks.op + "）");
+            if (firstPos >= 0) {
+                responseArea.setCaretPosition(firstPos);
+            }
+        } else {
+            resultLabel.setForeground(FAIL_COLOR);
+            resultLabel.setText("匹配失败 - 未满足关键字条件（" + ks.op + "）");
+        }
+    }
+
+    private void performRegexTest(String content, String regex, StyledDocument doc, Style highlightStyle) {
+        Pattern pattern = Pattern.compile(regex, Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        Matcher matcher = pattern.matcher(content);
+        int matchCount = 0;
+        while (matcher.find()) {
+            matchCount++;
+            doc.setCharacterAttributes(matcher.start(), matcher.end() - matcher.start(),
+                    highlightStyle, false);
+        }
+        if (matchCount > 0) {
+            resultLabel.setForeground(SUCCESS_COLOR);
+            resultLabel.setText("匹配成功! 找到 " + matchCount + " 处匹配");
+            Matcher first = pattern.matcher(content);
+            if (first.find()) {
+                responseArea.setCaretPosition(first.start());
+            }
+        } else {
+            resultLabel.setForeground(FAIL_COLOR);
+            resultLabel.setText("匹配失败 - 响应内容中未找到匹配项");
         }
     }
 

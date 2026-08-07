@@ -9,6 +9,10 @@ import java.util.regex.Pattern;
  */
 public final class CompiledRule {
 
+    public enum MatchMode {
+        REGEX, KEYWORD
+    }
+
     private final String name;
     private final String regex;
     private final Pattern pattern;
@@ -22,14 +26,17 @@ public final class CompiledRule {
      * 匹配时走 contains AND，不调用 Pattern.find（避免 (?=.*x)(?=.*y) 回溯）。
      */
     private final List<String> lookaheadAndLiterals;
+    private final MatchMode matchMode;
+    private final KeywordSpec keywordSpec;
 
+    /** 测试/旧调用：默认 REGEX */
     public CompiledRule(String name, String regex, Pattern pattern,
                         String state, String url,
                         boolean prefilterDisabled,
                         List<String> mustLiterals,
                         List<List<String>> orGroups) {
         this(name, regex, pattern, state, url, prefilterDisabled,
-                mustLiterals, orGroups, null);
+                mustLiterals, orGroups, null, MatchMode.REGEX, null);
     }
 
     public CompiledRule(String name, String regex, Pattern pattern,
@@ -38,6 +45,18 @@ public final class CompiledRule {
                         List<String> mustLiterals,
                         List<List<String>> orGroups,
                         List<String> lookaheadAndLiterals) {
+        this(name, regex, pattern, state, url, prefilterDisabled,
+                mustLiterals, orGroups, lookaheadAndLiterals, MatchMode.REGEX, null);
+    }
+
+    public CompiledRule(String name, String regex, Pattern pattern,
+                        String state, String url,
+                        boolean prefilterDisabled,
+                        List<String> mustLiterals,
+                        List<List<String>> orGroups,
+                        List<String> lookaheadAndLiterals,
+                        MatchMode matchMode,
+                        KeywordSpec keywordSpec) {
         this.name = name;
         this.regex = regex;
         this.pattern = pattern;
@@ -53,6 +72,16 @@ public final class CompiledRule {
         this.lookaheadAndLiterals = lookaheadAndLiterals != null && !lookaheadAndLiterals.isEmpty()
                 ? Collections.unmodifiableList(lookaheadAndLiterals)
                 : null;
+        this.matchMode = matchMode != null ? matchMode : MatchMode.REGEX;
+        this.keywordSpec = keywordSpec;
+    }
+
+    /** 工厂：字符串匹配规则 */
+    public static CompiledRule keyword(String name, String raw, String state, String url,
+                                       KeywordSpec spec) {
+        return new CompiledRule(name, raw, null, state, url, true,
+                Collections.emptyList(), Collections.emptyList(), null,
+                MatchMode.KEYWORD, spec);
     }
 
     public String getName() {
@@ -94,5 +123,17 @@ public final class CompiledRule {
 
     public boolean isLookaheadAndOptimized() {
         return lookaheadAndLiterals != null && !lookaheadAndLiterals.isEmpty();
+    }
+
+    public MatchMode getMatchMode() {
+        return matchMode;
+    }
+
+    public boolean isKeyword() {
+        return matchMode == MatchMode.KEYWORD && keywordSpec != null;
+    }
+
+    public KeywordSpec getKeywordSpec() {
+        return keywordSpec;
     }
 }
