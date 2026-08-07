@@ -49,6 +49,13 @@ public class Config {
     public static final String KEY_ENABLE_PAYLOAD_PROCESSING = "payload-processing";
     public static final String KEY_ENABLE_ACTIVE_SCAN = "enable-active-scan";
     public static final String KEY_FINGERPRINT_URL_MATCH = "fingerprint-url-match";
+    // 匹配 CPU 优化
+    public static final String KEY_MATCH_LITERAL_PREFILTER = "match-literal-prefilter";
+    public static final String KEY_MATCH_LITERAL_MIN_LENGTH = "match-literal-min-length";
+    public static final String KEY_MATCH_SKIP_BINARY = "match-skip-binary";
+    public static final String KEY_ANALYSIS_THREAD_COUNT = "analysis-thread-count";
+    public static final String KEY_ANALYSIS_QUEUE_SIZE = "analysis-queue-size";
+    public static final String KEY_MATCH_CONCURRENCY = "match-concurrency";
     // 配置常量值
     public static final String DIRECT_LEFT = "left";
     public static final String DIRECT_RIGHT = "right";
@@ -96,6 +103,12 @@ public class Config {
         initDefaultConfig(Config.KEY_ENABLE_PAYLOAD_PROCESSING, "true");
         initDefaultConfig(Config.KEY_ENABLE_ACTIVE_SCAN, "true");
         initDefaultConfig(Config.KEY_FINGERPRINT_URL_MATCH, "false");
+        initDefaultConfig(Config.KEY_MATCH_LITERAL_PREFILTER, "true");
+        initDefaultConfig(Config.KEY_MATCH_LITERAL_MIN_LENGTH, "3");
+        initDefaultConfig(Config.KEY_MATCH_SKIP_BINARY, "true");
+        initDefaultConfig(Config.KEY_ANALYSIS_THREAD_COUNT, "4");
+        initDefaultConfig(Config.KEY_ANALYSIS_QUEUE_SIZE, "2000");
+        initDefaultConfig(Config.KEY_MATCH_CONCURRENCY, "4");
         initDefaultConfig("yaml_config_path", getWorkDir() + "Config_yaml.yaml");
         // 初始化数据收集管理
         // 初始化字典管理

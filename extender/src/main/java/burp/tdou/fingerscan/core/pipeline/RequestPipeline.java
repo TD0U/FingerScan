@@ -13,6 +13,7 @@ import burp.tdou.fingerscan.common.Config;
 import burp.tdou.fingerscan.core.ScanRequest;
 import burp.tdou.fingerscan.core.ScanResult;
 import burp.tdou.fingerscan.core.ScanTask;
+import burp.tdou.fingerscan.core.rule.ContentTypeGate;
 import burp.tdou.fingerscan.core.rule.MatchResult;
 import burp.tdou.fingerscan.core.rule.RuleEngine;
 import burp.tdou.fingerscan.core.iconhash.IconHashMatcher;
@@ -21,10 +22,17 @@ import burp.tdou.fingerscan.core.iconhash.IconHashStore;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 /**
@@ -32,7 +40,7 @@ import java.util.stream.Collectors;
  *
  * 两个线程池按职责划分：
  * - requestPool (请求池): 所有需要发 HTTP 请求的任务，受 QPS 限制
- * - analysisPool (分析池): 被动指纹匹配等纯分析任务，不发请求，不限速
+ * - analysisPool (分析池): 被动指纹匹配等纯分析任务，有界队列
  */
 public class RequestPipeline {
 
@@ -48,23 +56,40 @@ public class RequestPipeline {
     private final IconHashStore iconHashStore;
 
     private volatile ExecutorService requestPool;
-    private volatile ExecutorService analysisPool;
+    private volatile ThreadPoolExecutor analysisPool;
 
     private final AtomicInteger requestCommitCount = new AtomicInteger(0);
     private final AtomicInteger requestOverCount = new AtomicInteger(0);
     private final AtomicInteger analysisCount = new AtomicInteger(0);
+    private final AtomicLong analysisDiscardTotal = new AtomicLong();
+    private final AtomicLong discardLogWindowStartMs = new AtomicLong(System.currentTimeMillis());
+    private final AtomicLong discardCountAtWindowStart = new AtomicLong(0);
+    private final AtomicReference<Semaphore> matchSemaphore = new AtomicReference<>();
 
     private final int requestThreadCount;
-    private final int analysisThreadCount;
+    private volatile int analysisThreadCount;
+    private volatile int analysisQueueSize;
 
     public RequestPipeline(MontoyaApi api, RuleEngine ruleEngine,
                            int requestThreadCount, int analysisThreadCount,
                            int qpsLimit, int qpsDelay,
                            IconHashMatcher iconHashMatcher, IconHashStore iconHashStore) {
+        this(api, ruleEngine, requestThreadCount, analysisThreadCount,
+                Config.getInt(Config.KEY_ANALYSIS_QUEUE_SIZE),
+                Config.getInt(Config.KEY_MATCH_CONCURRENCY),
+                qpsLimit, qpsDelay, iconHashMatcher, iconHashStore);
+    }
+
+    public RequestPipeline(MontoyaApi api, RuleEngine ruleEngine,
+                           int requestThreadCount, int analysisThreadCount,
+                           int analysisQueueSize, int matchConcurrency,
+                           int qpsLimit, int qpsDelay,
+                           IconHashMatcher iconHashMatcher, IconHashStore iconHashStore) {
         this.api = api;
         this.ruleEngine = ruleEngine;
         this.requestThreadCount = requestThreadCount;
-        this.analysisThreadCount = analysisThreadCount;
+        this.analysisThreadCount = Math.max(1, analysisThreadCount);
+        this.analysisQueueSize = Math.max(1, analysisQueueSize);
         this.iconHashMatcher = iconHashMatcher;
         this.iconHashStore = iconHashStore;
 
@@ -76,7 +101,8 @@ public class RequestPipeline {
         this.dispatcher = new ResultDispatcher();
 
         this.requestPool = Executors.newFixedThreadPool(requestThreadCount);
-        this.analysisPool = Executors.newFixedThreadPool(analysisThreadCount);
+        this.analysisPool = createAnalysisPool(this.analysisThreadCount, this.analysisQueueSize);
+        this.matchSemaphore.set(new Semaphore(Math.max(1, matchConcurrency), true));
     }
 
     /**
@@ -100,36 +126,65 @@ public class RequestPipeline {
      * 分析任务：不发 HTTP 请求，只做指纹匹配
      */
     private void submitAnalysis(ScanTask task) {
-        ExecutorService pool = analysisPool;
-        if (pool.isShutdown()) {
+        ThreadPoolExecutor pool = analysisPool;
+        if (pool == null || pool.isShutdown()) {
             dedup.remove(task.getDeduplicationKey());
             return;
         }
 
-        pool.execute(() -> {
-            try {
-                HttpRequestResponse reqResp = task.getReqResp();
-                // 从 reqResp 局部派生请求/响应字节，仅用于本次匹配，方法结束即可回收
-                byte[] reqBytes = reqResp != null && reqResp.request() != null
-                        ? reqResp.request().toByteArray().getBytes() : null;
-                byte[] respBytes = reqResp != null && reqResp.response() != null
-                        ? reqResp.response().toByteArray().getBytes() : null;
-                String requestPath = reqResp != null && reqResp.request() != null
-                        ? extractRequestPath(reqResp.request()) : "";
-                List<MatchResult> matches = ruleEngine.match(reqBytes, respBytes, requestPath);
+        try {
+            pool.execute(() -> {
+                try {
+                    HttpRequestResponse reqResp = task.getReqResp();
+                    byte[] reqBytes = reqResp != null && reqResp.request() != null
+                            ? reqResp.request().toByteArray().getBytes() : null;
+                    byte[] respBytes = reqResp != null && reqResp.response() != null
+                            ? reqResp.response().toByteArray().getBytes() : null;
+                    String requestPath = reqResp != null && reqResp.request() != null
+                            ? extractRequestPath(reqResp.request()) : "";
 
-                // 无论是否匹配到指纹，都构建完整结果用于扫描记录
-                ScanResult.Builder builder = new ScanResult.Builder()
-                        .from(task.getFrom())
-                        .matchResults(matches);
+                    // 空 body：不占引擎（与 skip-binary 无关）
+                    List<MatchResult> matches;
+                    if (respBytes == null || respBytes.length == 0) {
+                        matches = Collections.emptyList();
+                    } else {
+                        String ct = extractContentType(reqResp);
+                        if (Config.getBoolean(Config.KEY_MATCH_SKIP_BINARY)
+                                && !ContentTypeGate.allowYamlMatch(ct, requestPath)) {
+                            matches = Collections.emptyList();
+                        } else {
+                            // 分析池内 match：不再二次 acquire 信号量
+                            matches = ruleEngine.match(reqBytes, respBytes, requestPath);
+                        }
+                    }
 
-                fillResultFromReqResp(builder, task);
-                dispatcher.dispatch(builder.build());
-                analysisCount.incrementAndGet();
-            } catch (Exception e) {
-                Logger.error("Analysis error: %s", e.getMessage());
-            }
-        });
+                    ScanResult.Builder builder = new ScanResult.Builder()
+                            .from(task.getFrom())
+                            .matchResults(matches);
+
+                    fillResultFromReqResp(builder, task);
+                    dispatcher.dispatch(builder.build());
+                    analysisCount.incrementAndGet();
+                } catch (Exception e) {
+                    Logger.error("Analysis error: %s", e.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            // execute 在饱和时走 RejectedExecutionHandler，一般不抛；兜底
+            Logger.debug("Analysis submit failed: %s", e.getMessage());
+            dedup.remove(task.getDeduplicationKey());
+        }
+    }
+
+    private static String extractContentType(HttpRequestResponse reqResp) {
+        if (reqResp == null || reqResp.response() == null) {
+            return null;
+        }
+        try {
+            return reqResp.response().headerValue("Content-Type");
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -327,7 +382,7 @@ public class RequestPipeline {
         }
 
         byte[] reqBytes = request != null ? request.toByteArray().getBytes() : null;
-        List<MatchResult> matches = ruleEngine.match(reqBytes, respBytes, reqUrl);
+        List<MatchResult> matches = matchYamlFromRequestThread(reqBytes, respBytes, reqUrl, reqResp);
 
         return new ScanResult.Builder()
                 .reqResp(reqResp)
@@ -341,6 +396,123 @@ public class RequestPipeline {
                 .length(length)
                 .matchResults(matches)
                 .build();
+    }
+
+    /**
+     * 主动扫描路径上的 YAML 匹配：空 body / CT 门禁 + match 信号量（阻塞不丢）。
+     */
+    private List<MatchResult> matchYamlFromRequestThread(byte[] reqBytes, byte[] respBytes,
+                                                         String requestPath,
+                                                         HttpRequestResponse reqResp) {
+        if (respBytes == null || respBytes.length == 0) {
+            return Collections.emptyList();
+        }
+        String ct = extractContentType(reqResp);
+        if (Config.getBoolean(Config.KEY_MATCH_SKIP_BINARY)
+                && !ContentTypeGate.allowYamlMatch(ct, requestPath)) {
+            return Collections.emptyList();
+        }
+
+        Semaphore sem = matchSemaphore.get();
+        if (sem == null) {
+            return ruleEngine.match(reqBytes, respBytes, requestPath);
+        }
+        boolean loggedWait = false;
+        try {
+            while (!sem.tryAcquire(1, TimeUnit.SECONDS)) {
+                if (!loggedWait) {
+                    Logger.error("Match semaphore busy (queueLength≈%d); waiting (active scan slows, no drop)",
+                            sem.getQueueLength());
+                    loggedWait = true;
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return Collections.emptyList();
+        }
+        try {
+            return ruleEngine.match(reqBytes, respBytes, requestPath);
+        } finally {
+            sem.release();
+        }
+    }
+
+    private ThreadPoolExecutor createAnalysisPool(int threads, int queueCapacity) {
+        int t = Math.max(1, threads);
+        int q = Math.max(1, queueCapacity);
+        return new ThreadPoolExecutor(
+                t, t, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(q),
+                r -> {
+                    Thread th = new Thread(r, "fingerscan-analysis");
+                    th.setDaemon(true);
+                    return th;
+                },
+                this::onAnalysisRejected);
+    }
+
+    private void onAnalysisRejected(Runnable r, ThreadPoolExecutor executor) {
+        long total = analysisDiscardTotal.incrementAndGet();
+        long now = System.currentTimeMillis();
+        long windowStart = discardLogWindowStartMs.get();
+        long since = now - windowStart;
+        long delta = total - discardCountAtWindowStart.get();
+        if (since > 30_000L || delta >= 100L) {
+            if (discardLogWindowStartMs.compareAndSet(windowStart, now)) {
+                discardCountAtWindowStart.set(total);
+                Logger.error("Analysis queue full: dropped %d tasks in last %dms (total dropped: %d, queue=%d, pool=%d)",
+                        delta, since, total,
+                        executor.getQueue() != null ? executor.getQueue().size() : -1,
+                        executor.getPoolSize());
+            }
+        }
+    }
+
+    public long getAnalysisDiscardTotal() {
+        return analysisDiscardTotal.get();
+    }
+
+    public void resetAnalysisDiscardTotal() {
+        analysisDiscardTotal.set(0);
+        discardCountAtWindowStart.set(0);
+        discardLogWindowStartMs.set(System.currentTimeMillis());
+    }
+
+    public void setMatchConcurrency(int n) {
+        matchSemaphore.set(new Semaphore(Math.max(1, n), true));
+    }
+
+    /**
+     * 优雅切换分析池：先挂新池，旧池 shutdown + await 5s，超时再 shutdownNow。
+     *
+     * @return true 新池已切换；false 创建失败且仍用旧池
+     */
+    public synchronized boolean rebuildAnalysisPool(int newThreads, int newQueueSize) {
+        ThreadPoolExecutor next;
+        try {
+            next = createAnalysisPool(newThreads, newQueueSize);
+        } catch (Exception e) {
+            Logger.error("create analysis pool failed: %s", e.getMessage());
+            return false;
+        }
+        ThreadPoolExecutor old = this.analysisPool;
+        this.analysisPool = next;
+        this.analysisThreadCount = Math.max(1, newThreads);
+        this.analysisQueueSize = Math.max(1, newQueueSize);
+        if (old == null) {
+            return true;
+        }
+        old.shutdown();
+        try {
+            if (!old.awaitTermination(5, TimeUnit.SECONDS)) {
+                int leftover = old.shutdownNow().size();
+                Logger.error("analysis pool forced shutdown, unfinished queue tasks≈%d", leftover);
+            }
+        } catch (InterruptedException e) {
+            old.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        return true;
     }
 
     /**
@@ -453,7 +625,11 @@ public class RequestPipeline {
 
     public ShutdownResult shutdown() {
         int reqCount = requestPool.shutdownNow().size();
-        int anaCount = analysisPool.shutdownNow().size();
+        int anaCount = 0;
+        ThreadPoolExecutor ap = analysisPool;
+        if (ap != null) {
+            anaCount = ap.shutdownNow().size();
+        }
         int dedupCount = dedup.size();
         int timeoutCount = timeoutTracker.size();
         dedup.clear();

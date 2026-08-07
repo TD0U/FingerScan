@@ -1,5 +1,23 @@
 # 更新日志
 
+## 2026-08-07 (v3.0.9)
+
+### 优化
+
+- **匹配阶段 CPU：字面量预过滤 + 门禁 + 有界分析池**
+
+  每条响应对全部规则跑 Java 正则、分析池无界高并发时，CPU 易打满。
+
+  **改动（不截断正文，预过滤失败开放，召回与关预过滤一致）：**
+  - 规则编译为 `RuleIndex` 快照；从正则保守抽取必现字面量，匹配前 `contains` 淘汰不可能命中的规则；字符类/`\w` 等与含非 ASCII 字面量的规则不预过滤，仍全文 `find`
+  - 空 body 与非文本 Content-Type（及 `octet-stream`+静态后缀）跳过 YAML 匹配；可用配置关闭跳过二进制
+  - 分析池默认 4 线程、队列 2000，满则丢弃并计数；主动扫描路径 YAML 匹配信号量默认 4（阻塞不丢结果）
+  - 「其他配置」可调预过滤/跳过二进制/线程/队列/并发，并查看丢弃计数
+
+  涉及文件：
+  - `LiteralExtractor` / `CompiledRule` / `RuleIndex` / `ContentTypeGate` / `YamlRuleEngine`
+  - `RequestPipeline`、`BurpExtender`、`Config`、`OtherTab`、i18n
+
 ## 2026-08-07 (v3.0.8)
 
 ### Bug 修复

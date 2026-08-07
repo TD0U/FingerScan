@@ -34,3 +34,6 @@ target
 # Superpowers internal plans/specs
 docs/superpowers/
 .superpowers/
+
+# Local design docs (do not publish)
+docs/designs/

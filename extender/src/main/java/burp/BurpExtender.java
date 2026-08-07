@@ -87,11 +87,11 @@ public class BurpExtender implements BurpExtension,
         TaskTable.OnTaskTableEventListener, OnTabEventListener {
 
     private static final int TASK_THREAD_COUNT = 50;
-    private static final int ANALYSIS_THREAD_COUNT = 10;
 
     // v3.0 新架构核心组件
     private ScanOrchestrator mOrchestrator;
     private YamlConfigStore mYamlConfigStore;
+    private YamlRuleEngine mYamlRuleEngine;
     private RecursiveDirectoryScanStrategy mRecursiveStrategy;
     private PayloadProcessingStrategy mPayloadStrategy;
     private IconHashStore mIconHashStore;
@@ -147,9 +147,9 @@ public class BurpExtender implements BurpExtension,
             mYamlConfigStore = new YamlConfigStore(yamlPath);
 
             // 2. 规则引擎（仅 YAML）
-            YamlRuleEngine yamlEngine = new YamlRuleEngine(mYamlConfigStore);
+            mYamlRuleEngine = new YamlRuleEngine(mYamlConfigStore);
             CompositeRuleEngine ruleEngine = new CompositeRuleEngine()
-                    .register(yamlEngine);
+                    .register(mYamlRuleEngine);
 
             // 2.5 Icon Hash 组件
             mIconHashRuleLoader = new IconHashRuleLoader(mYamlConfigStore);
@@ -168,14 +168,22 @@ public class BurpExtender implements BurpExtension,
                 mPathStore.createTable();
             }
 
-            // 3. 请求管道
+            // 3. 请求管道（分析池线程/队列、match 并发来自 Config）
             int qpsLimit = Config.getInt(Config.KEY_QPS_LIMIT);
             int qpsDelay = Config.getInt(Config.KEY_REQUEST_DELAY);
+            int analysisThreads = Math.max(1, Config.getInt(Config.KEY_ANALYSIS_THREAD_COUNT));
+            int analysisQueue = Math.max(1, Config.getInt(Config.KEY_ANALYSIS_QUEUE_SIZE));
+            int matchConcurrency = Math.max(1, Config.getInt(Config.KEY_MATCH_CONCURRENCY));
             RequestPipeline pipeline = new RequestPipeline(
                     mApi, ruleEngine,
-                    TASK_THREAD_COUNT, ANALYSIS_THREAD_COUNT,
+                    TASK_THREAD_COUNT, analysisThreads,
+                    analysisQueue, matchConcurrency,
                     qpsLimit, qpsDelay,
                     iconHashMatcher, mIconHashStore);
+            Logger.debug("RequestPipeline: analysisThreads=%d queue=%d matchConcurrency=%d prefilter=%s skipBinary=%s",
+                    analysisThreads, analysisQueue, matchConcurrency,
+                    Config.get(Config.KEY_MATCH_LITERAL_PREFILTER),
+                    Config.get(Config.KEY_MATCH_SKIP_BINARY));
 
             // 4. 过滤器链
             FaviconRegistry faviconRegistry = new FaviconRegistry();
@@ -662,7 +670,13 @@ public class BurpExtender implements BurpExtension,
                 }
                 break;
             case OtherTab.EVENT_UNLOAD_PLUGIN:
+                if (mYamlRuleEngine != null) {
+                    mYamlRuleEngine.dispose();
+                }
                 mApi.extension().unload();
+                break;
+            case OtherTab.EVENT_MATCH_CPU_SETTINGS:
+                onMatchCpuSettingsEvent(params);
                 break;
             case DataBoardTab.EVENT_IMPORT_URL:
                 importUrl((List<?>) params[0]);
@@ -670,6 +684,42 @@ public class BurpExtender implements BurpExtension,
             case DataBoardTab.EVENT_STOP_TASK:
                 stopAllTask();
                 break;
+        }
+    }
+
+    /**
+     * 匹配 CPU 配置保存/刷新：重建 RuleIndex、信号量、分析池。
+     */
+    private void onMatchCpuSettingsEvent(Object... params) {
+        String cmd = (params != null && params.length > 0 && params[0] != null)
+                ? String.valueOf(params[0]) : "apply";
+        if (mOrchestrator == null) {
+            return;
+        }
+        RequestPipeline pipeline = mOrchestrator.getPipeline();
+        if ("reset-discard".equals(cmd)) {
+            pipeline.resetAnalysisDiscardTotal();
+            Logger.debug("Event: analysis discard counter reset");
+            return;
+        }
+        if ("refresh-discard".equals(cmd)) {
+            Logger.debug("Event: analysis discard total=%d", pipeline.getAnalysisDiscardTotal());
+            return;
+        }
+        // apply
+        if (mYamlRuleEngine != null) {
+            mYamlRuleEngine.rebuildIndex();
+        }
+        int concurrency = Math.max(1, Config.getInt(Config.KEY_MATCH_CONCURRENCY));
+        pipeline.setMatchConcurrency(concurrency);
+        int threads = Math.max(1, Config.getInt(Config.KEY_ANALYSIS_THREAD_COUNT));
+        int queue = Math.max(1, Config.getInt(Config.KEY_ANALYSIS_QUEUE_SIZE));
+        boolean ok = pipeline.rebuildAnalysisPool(threads, queue);
+        if (!ok) {
+            UIHelper.showTipsDialog(L.get("analysis_pool_update_failed"));
+        } else {
+            Logger.debug("Event: match-cpu applied threads=%d queue=%d concurrency=%d discard=%d",
+                    threads, queue, concurrency, pipeline.getAnalysisDiscardTotal());
         }
     }
 
