@@ -71,10 +71,13 @@ public class FaviconLinkExtractor {
     }
 
     private static FaviconLink resolveHref(String href, String requestPath) {
+        // 去掉 fragment，保留 query（动态 favicon 接口常把参数放在 query 里）
+        href = stripFragment(href);
+
         if (href.startsWith("//")) {
             try {
                 URI uri = new URI("https:" + href);
-                return new FaviconLink(uri.getHost(), uri.getPath());
+                return new FaviconLink(uri.getHost(), pathWithQuery(uri));
             } catch (Exception e) {
                 return null;
             }
@@ -83,7 +86,7 @@ public class FaviconLinkExtractor {
         if (href.startsWith("http://") || href.startsWith("https://")) {
             try {
                 URI uri = new URI(href);
-                return new FaviconLink(uri.getHost(), uri.getPath());
+                return new FaviconLink(uri.getHost(), pathWithQuery(uri));
             } catch (Exception e) {
                 return null;
             }
@@ -91,16 +94,67 @@ public class FaviconLinkExtractor {
 
         String raw;
         if (href.startsWith("/")) {
-            raw = href.split("\\?")[0].split("#")[0];
+            raw = href;
         } else {
             String basePath = "/";
             if (requestPath != null && requestPath.contains("/")) {
-                basePath = requestPath.substring(0, requestPath.lastIndexOf('/') + 1);
+                // base 只用路径部分，不含 query
+                String base = stripQueryAndFragment(requestPath);
+                basePath = base.substring(0, base.lastIndexOf('/') + 1);
             }
             raw = basePath + href;
-            raw = raw.split("\\?")[0].split("#")[0];
         }
-        return new FaviconLink(null, normalizePath(raw));
+        return new FaviconLink(null, normalizePathKeepQuery(raw));
+    }
+
+    /** URI 的 path + query（若有） */
+    private static String pathWithQuery(URI uri) {
+        String path = uri.getPath();
+        if (path == null || path.isEmpty()) {
+            path = "/";
+        }
+        String query = uri.getRawQuery();
+        if (query != null && !query.isEmpty()) {
+            return path + "?" + query;
+        }
+        return path;
+    }
+
+    private static String stripFragment(String s) {
+        if (s == null) return null;
+        int h = s.indexOf('#');
+        return h >= 0 ? s.substring(0, h) : s;
+    }
+
+    private static String stripQueryAndFragment(String s) {
+        if (s == null) return null;
+        int q = s.indexOf('?');
+        if (q >= 0) s = s.substring(0, q);
+        int h = s.indexOf('#');
+        if (h >= 0) s = s.substring(0, h);
+        return s;
+    }
+
+    /**
+     * 规范化 path，保留 query。
+     * 例：/a/../b/?x=1 → /b/?x=1
+     */
+    private static String normalizePathKeepQuery(String pathAndQuery) {
+        if (pathAndQuery == null || pathAndQuery.isEmpty()) {
+            return pathAndQuery;
+        }
+        String path = pathAndQuery;
+        String query = null;
+        int q = pathAndQuery.indexOf('?');
+        if (q >= 0) {
+            path = pathAndQuery.substring(0, q);
+            query = pathAndQuery.substring(q + 1);
+        }
+        path = normalizePath(path);
+        if (query != null && !query.isEmpty()) {
+            return path + "?" + query;
+        }
+        return path;
     }
 
     private static String normalizePath(String path) {

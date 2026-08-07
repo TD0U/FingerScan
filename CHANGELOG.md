@@ -15,6 +15,15 @@
   - `RequestPipeline.java` — `from=IconHash` 的 HTTP 响应走 Icon Hash 分析入库，不跑普通指纹规则
   - `ScanRequest.java` — 新增 `FROM_ICON_HASH`
 
+- **favicon 链接带 query 时主动拉取路径被截断**
+
+  部分站点的图标地址通过查询参数动态下发（`<link rel="shortcut icon" href="/path/?...">`）。`FaviconLinkExtractor` 解析时用 `split("?")` / `URI.getPath()` 丢掉 query，主动拉取只请求到纯路径（常为 HTML 页面）而非真正的 favicon 接口，图标数据仍为空或内容错误。
+
+  **修复**：解析 href 时保留 path + query，仅去掉 fragment；相对路径拼接同样保留 query。
+
+  涉及文件：
+  - `FaviconLinkExtractor.java` — `resolveHref` 改为 `pathWithQuery` / `normalizePathKeepQuery`
+
 ## 2026-07-28 (v3.0.7)
 
 ### 优化
