@@ -1,5 +1,6 @@
 package burp.tdou.fingerscan.core.rule;
 
+import burp.tdou.common.log.Logger;
 import burp.tdou.fingerscan.common.Config;
 import burp.tdou.fingerscan.config.YamlConfigStore;
 import org.junit.jupiter.api.BeforeAll;
@@ -33,6 +34,7 @@ class YamlRuleEnginePrefilterTest {
 
     @BeforeAll
     static void setup() throws Exception {
+        Logger.init(false, System.out, System.err);
         Config.init(tmp.resolve("work").toString() + File.separator);
         yamlFile = tmp.resolve("test-rules.yaml").toFile();
         writeRules(yamlFile);

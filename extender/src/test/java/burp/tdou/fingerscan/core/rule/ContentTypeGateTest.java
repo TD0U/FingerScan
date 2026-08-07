@@ -1,5 +1,6 @@
 package burp.tdou.fingerscan.core.rule;
 
+import burp.tdou.common.log.Logger;
 import burp.tdou.fingerscan.common.Config;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,8 @@ class ContentTypeGateTest {
 
     @BeforeAll
     static void initConfig() {
+        // Config.init 可能打 Logger；CI 下未 init 会 NPE
+        Logger.init(false, System.out, System.err);
         Config.init(tmp.resolve("work").toString() + java.io.File.separator);
         Config.put(Config.KEY_MATCH_SKIP_BINARY, "true");
     }
