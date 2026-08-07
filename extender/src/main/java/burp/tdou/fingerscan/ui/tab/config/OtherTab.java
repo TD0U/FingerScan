@@ -43,6 +43,8 @@ public class OtherTab extends BaseConfigTab {
                 10, Config.KEY_ANALYSIS_QUEUE_SIZE).addKeyListener(new NumberFilter(6));
         addTextConfigPanel(L.get("match_concurrency"), L.get("match_concurrency_sub_title"),
                 10, Config.KEY_MATCH_CONCURRENCY).addKeyListener(new NumberFilter(3));
+        addTextConfigPanel(L.get("match_timeout_ms"), L.get("match_timeout_ms_sub_title"),
+                10, Config.KEY_MATCH_TIMEOUT_MS).addKeyListener(new NumberFilter(6));
 
         addConfigItem(L.get("analysis_discard_count"), L.get("analysis_discard_count_sub_title"),
                 buildDiscardPanel());
@@ -135,6 +137,17 @@ public class OtherTab extends BaseConfigTab {
                 return false;
             }
             Config.put(configKey, String.valueOf(value));
+            sendTabEvent(EVENT_MATCH_CPU_SETTINGS, "apply");
+            return true;
+        }
+        if (Config.KEY_MATCH_TIMEOUT_MS.equals(configKey)) {
+            // 0 = disable timeout
+            if (value < 0 || value > 60000) {
+                UIHelper.showTipsDialog(L.get("match_timeout_ms_invalid"));
+                return false;
+            }
+            Config.put(configKey, String.valueOf(value));
+            // 超时仅读 Config，无需重建池；仍发 apply 以便日志
             sendTabEvent(EVENT_MATCH_CPU_SETTINGS, "apply");
             return true;
         }

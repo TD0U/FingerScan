@@ -9,17 +9,25 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 
 /**
  * YAML 规则引擎：RuleIndex 快照 + 字面量预过滤（失败开放）+ Pattern.find 最终裁决。
- * 正文不截断。
+ * 正文不截断。单条规则 find 支持超时（TimeoutCharSequence），避免灾难性回溯钉死分析线程。
  */
 public class YamlRuleEngine implements RuleEngine {
 
     private final YamlConfigStore configStore;
     private final RuleIndex ruleIndex = new RuleIndex();
     private final Runnable changeListener = this::rebuildIndex;
+
+    private final AtomicLong matchTimeoutTotal = new AtomicLong();
+    private final ConcurrentHashMap<String, AtomicLong> timeoutByRule = new ConcurrentHashMap<>();
+    private final AtomicLong timeoutLogWindowStartMs = new AtomicLong(System.currentTimeMillis());
+    private final AtomicLong timeoutCountAtWindowStart = new AtomicLong(0);
 
     public YamlRuleEngine(YamlConfigStore configStore) {
         this.configStore = configStore;
@@ -40,7 +48,7 @@ public class YamlRuleEngine implements RuleEngine {
         if (minLen < 1) {
             minLen = 3;
         }
-        List<java.util.Map<String, Object>> rules = configStore != null
+        List<Map<String, Object>> rules = configStore != null
                 ? configStore.getEnabledRules()
                 : Collections.emptyList();
         ruleIndex.rebuild(rules, minLen);
@@ -48,6 +56,30 @@ public class YamlRuleEngine implements RuleEngine {
 
     public RuleIndex getRuleIndex() {
         return ruleIndex;
+    }
+
+    public long getMatchTimeoutTotal() {
+        return matchTimeoutTotal.get();
+    }
+
+    public void resetMatchTimeoutTotal() {
+        matchTimeoutTotal.set(0);
+        timeoutByRule.clear();
+        timeoutCountAtWindowStart.set(0);
+        timeoutLogWindowStartMs.set(System.currentTimeMillis());
+    }
+
+    /** 返回超时次数最多的规则快照（最多 limit 条），用于日志/UI */
+    public List<Map.Entry<String, Long>> topTimeoutRules(int limit) {
+        List<Map.Entry<String, Long>> list = new ArrayList<>();
+        for (Map.Entry<String, AtomicLong> e : timeoutByRule.entrySet()) {
+            list.add(Map.entry(e.getKey(), e.getValue().get()));
+        }
+        list.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
+        if (list.size() > limit) {
+            return list.subList(0, limit);
+        }
+        return list;
     }
 
     /** 插件卸载时移除监听 */
@@ -72,9 +104,14 @@ public class YamlRuleEngine implements RuleEngine {
         String responseStr = new String(response);
         int statusCode = parseStatusCode(responseStr);
         boolean prefilterOn = true;
+        long timeoutMs = 100L;
         try {
             prefilterOn = Config.getBoolean(Config.KEY_MATCH_LITERAL_PREFILTER);
+            timeoutMs = Config.getInt(Config.KEY_MATCH_TIMEOUT_MS);
         } catch (Exception ignored) {
+        }
+        if (timeoutMs < 0) {
+            timeoutMs = 0;
         }
 
         String textFolded = null;
@@ -96,15 +133,59 @@ public class YamlRuleEngine implements RuleEngine {
                         continue;
                     }
                 }
-                Matcher matcher = rule.getPattern().matcher(responseStr);
-                if (matcher.find()) {
+                if (findWithTimeout(rule, responseStr, timeoutMs)) {
                     results.add(MatchResult.fromYamlRule(rule.getName(), rule.getRegex()));
                 }
+            } catch (MatchTimeoutException te) {
+                onRuleTimeout(te.getRuleName(), te.getTimeoutMs(), requestPath);
             } catch (Exception e) {
                 Logger.debug("YamlRuleEngine match error: %s", e.getMessage());
             }
         }
         return results;
+    }
+
+    /**
+     * @return true 若 find 命中；超时抛 {@link MatchTimeoutException}
+     */
+    boolean findWithTimeout(CompiledRule rule, String responseStr, long timeoutMs) {
+        if (timeoutMs <= 0) {
+            Matcher matcher = rule.getPattern().matcher(responseStr);
+            return matcher.find();
+        }
+        long deadline = System.nanoTime() + timeoutMs * 1_000_000L;
+        CharSequence cs = new TimeoutCharSequence(responseStr, deadline, rule.getName(), timeoutMs);
+        Matcher matcher = rule.getPattern().matcher(cs);
+        return matcher.find();
+    }
+
+    private void onRuleTimeout(String ruleName, long timeoutMs, String requestPath) {
+        long total = matchTimeoutTotal.incrementAndGet();
+        String name = ruleName != null ? ruleName : "?";
+        timeoutByRule.computeIfAbsent(name, k -> new AtomicLong()).incrementAndGet();
+
+        long now = System.currentTimeMillis();
+        long windowStart = timeoutLogWindowStartMs.get();
+        long since = now - windowStart;
+        long delta = total - timeoutCountAtWindowStart.get();
+        // 每条超时先 debug；窗口汇总 error（Logger 无 warn）
+        Logger.debug("regex match timeout: rule=%s limitMs=%d path=%s totalTimeouts=%d",
+                name, timeoutMs, requestPath != null ? requestPath : "", total);
+
+        if (since > 30_000L || delta >= 20L) {
+            if (timeoutLogWindowStartMs.compareAndSet(windowStart, now)) {
+                timeoutCountAtWindowStart.set(total);
+                StringBuilder top = new StringBuilder();
+                for (Map.Entry<String, Long> e : topTimeoutRules(5)) {
+                    if (top.length() > 0) {
+                        top.append(", ");
+                    }
+                    top.append(e.getKey()).append('=').append(e.getValue());
+                }
+                Logger.error("regex match timeouts: +%d in %dms (total=%d). top: %s",
+                        delta, since, total, top);
+            }
+        }
     }
 
     /**

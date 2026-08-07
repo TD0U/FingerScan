@@ -1,5 +1,23 @@
 # 更新日志
 
+## 2026-08-07 (v3.0.10)
+
+### 优化
+
+- **单条规则 Matcher 超时 + 超时计数/日志**
+
+  3.0.9 将分析并发限制为 4 后，采样仍显示 `fingerscan-analysis` 线程长时间卡在 `Pattern$CharPropertyGreedy` / `Matcher.find`（单线程累计数百秒 CPU）。字面量预过滤无法打断已进入 `find` 的灾难性回溯。
+
+  **改动：**
+  - `TimeoutCharSequence`：在 `charAt` 中按截止时间抛出 `MatchTimeoutException`，打断回溯
+  - 默认每条规则 `find` 限时 **100ms**（`match-timeout-ms`，0=关闭）
+  - 超时跳过该规则（不中断整次响应的其余规则）；累计计数 + 按规则名统计；debug 逐条、30s/20 次窗口汇总 error 日志（含 Top 规则名）
+  - 「其他配置」可调超时毫秒数
+
+  涉及文件：
+  - `TimeoutCharSequence` / `MatchTimeoutException` / `YamlRuleEngine`
+  - `Config`、`OtherTab`、i18n
+
 ## 2026-08-07 (v3.0.9)
 
 ### 优化
